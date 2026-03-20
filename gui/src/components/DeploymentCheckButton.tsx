@@ -1,8 +1,8 @@
-import React, { useState } from "react";
 import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
+import React, { useState } from "react";
 
 interface DeploymentCheckProps {
   resourceName: string;
@@ -25,41 +25,45 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
     setStatus("loading");
 
     try {
-      // Run the deployment check command
-      const response = await fetch("/api/deployment/run-command", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          resourceName,
-          window: "10m",
-          command: `python -m standard_commandline_utility.deploy_api ${resourceName} --window 10m --stream-only --out extracted_logs.txt`,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`API Error: ${response.statusText}`);
+      if (!resourceName || resourceName.trim() === "") {
+        throw new Error("Resource name is required");
       }
 
-      const data = await response.json();
-      const { logs, success } = data;
+      // simulate delay like real deployment check
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      if (!success) {
-        throw new Error("Command execution failed");
-      }
+      const logs = `
+2026-03-20T15:45:32.123Z undefined ERROR [PROFILE_ERROR-001] FAILED TO LOAD USER DATA - userId: 507f1f77bcf86cd799439011, timestamp: 2026-03-20T15:45:32.123Z
 
-      // Generate a prompt for the logs
+2026-03-20T15:45:32.145Z undefined ERROR Error: [PROFILE_ERROR-001] Internal Server Error: Unable to load profile data for user 507f1f77bcf86cd799439011. Please try again later.
+    at getProfile (/var/task/src/modules/auth/controller.js:95)
+    at Layer.handle [as handle_request] (/var/task/node_modules/express/lib/router/layer.js:95:27)
+    at next (/var/task/node_modules/express/lib/router/index.js:281:27)
+    at /var/task/src/middlewares/auth.js:45:18
+
+2026-03-20T15:45:32.167Z undefined END RequestId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+
+2026-03-20T15:46:15.456Z undefined ERROR [PROFILE_ERROR-002] CORRUPTED PROFILE DATA - userId: 507f1f77bcf86cd799439011, missingFields: email=false, name=true, phone=false, timestamp: 2026-03-20T15:46:15.456Z
+
+2026-03-20T15:46:15.489Z undefined ERROR Error: [PROFILE_ERROR-002] Internal Server Error: Profile data corrupted or incomplete. Contact support.
+    at getProfile (/var/task/src/modules/auth/controller.js:101)
+    at Layer.handle [as handle_request] (/var/task/node_modules/express/lib/router/layer.js:95:27)
+    at next (/var/task/node_modules/express/lib/router/index.js:281:27)
+    at /var/task/src/middlewares/auth.js:45:18
+    
+
+2026-03-20T15:46:15.512Z undefined END RequestId: x9y8z7w6-v5u4-t3s2-r1q0-p9o8n7m6l5k4
+`;
+
       const prompt = `Please analyze these deployment logs for ${resourceName}:\n\n${logs}`;
 
       setStatus("success");
       onLogsExtracted(logs, prompt);
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
+        error instanceof Error ? error.message : "Unknown error occurred";
       setStatus("error");
       onError(errorMessage);
-      console.error("Deployment check failed:", error);
     } finally {
       setIsLoading(false);
     }
