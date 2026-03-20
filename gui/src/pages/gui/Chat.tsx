@@ -502,10 +502,34 @@ export function Chat() {
               <DeploymentCheckButton
                 resourceName="JalSaathi"
                 onLogsExtracted={(logs, prompt) => {
-                  // Send logs and prompt to chat
-                  const message = `\`\`\`deployment-analysis\n${logs}\n\`\`\`\n\n${prompt}`;
-                  // You can dispatch this to send message to agent
-                  console.log("Logs extracted:", logs);
+                  // Create editor state with the prompt message
+                  const editorState: JSONContent = {
+                    type: "doc",
+                    content: [
+                      {
+                        type: "paragraph",
+                        content: [
+                          {
+                            type: "text",
+                            text: prompt,
+                          },
+                        ],
+                      },
+                    ],
+                  };
+
+                  // Automatically send the message to the chatbot
+                  const modifiers: InputModifiers = {
+                    useCodebase: false,
+                    noContext: false,
+                  };
+                  dispatch(
+                    streamResponseThunk({
+                      editorState,
+                      modifiers,
+                      index: undefined,
+                    }),
+                  );
                 }}
                 onError={(error) => {
                   console.error("Deployment check failed:", error);

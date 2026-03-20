@@ -1,6 +1,9 @@
 import chalk from "chalk";
 import type { ChatHistoryItem } from "core/index.js";
 import express, { Request, Response } from "express";
+import { execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 
 import { ToolPermissionServiceState } from "src/services/ToolPermissionService.js";
 import { posthogService } from "src/telemetry/posthogService.js";
@@ -357,7 +360,95 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
   // Track intervals for cleanup
   let inactivityChecker: NodeJS.Timeout | null = null;
 
-  // POST /exit - Gracefully shut down the server
+  // GET /api/health - Simple health check
+  app.get("/api/health", (_req: Request, res: Response) => {
+    res.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      cwd: process.cwd(),
+    });
+  });
+
+  // POST /api/deployment/run-command - Run deployment check command and read logs
+  app.post(
+    "/api/deployment/run-command",
+    async (req: Request, res: Response) => {
+      state.lastActivity = Date.now();
+
+      try {
+        const { resourceName, window: timeWindow } = req.body;
+
+        if (!resourceName) {
+          return res.status(400).json({ error: "resourceName is required" });
+        }
+
+        // Build the command to execute
+        const deployCommand = `python -m standard_commandline_utility.deploy_api ${resourceName} --window ${timeWindow || "10m"} --stream-only --out extracted_logs.txt`;
+
+        logger.info(`Executing deployment command: ${deployCommand}`);
+
+        // Execute the command
+        let commandOutput = "";
+        let execError = null;
+
+        try {
+          commandOutput = execSync(deployCommand, {
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "pipe"],
+            cwd: process.cwd(),
+          });
+          logger.info("Deployment command executed successfully");
+        } catch (error: any) {
+          // Command may fail, but logs file might still be created
+          execError = error;
+          logger.warn(`Command execution failed: ${error.message}`);
+          // Continue - we'll check for the logs file anyway
+        }
+
+        // Wait a moment for file to be written
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        // Read the extracted logs file
+        const logsFilePath = path.join(process.cwd(), "extracted_logs.txt");
+        let logs = "";
+        let fileExists = false;
+
+        try {
+          fileExists = fs.existsSync(logsFilePath);
+          if (fileExists) {
+            logs = fs.readFileSync(logsFilePath, "utf-8");
+            logger.info(
+              `Successfully read logs from ${logsFilePath} (${logs.length} bytes)`,
+            );
+          } else {
+            logs =
+              commandOutput ||
+              "No logs file found and no command output available";
+            logger.warn(`Logs file not found at ${logsFilePath}`);
+          }
+        } catch (fileError: any) {
+          logger.error(`Failed to read logs file: ${fileError.message}`);
+          logs = commandOutput || `Error reading logs: ${fileError.message}`;
+        }
+
+        res.json({
+          success: true,
+          logs: logs,
+          resourceName: resourceName,
+          fileExists: fileExists,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        const errorMsg = formatError(error);
+        logger.error(`Deployment endpoint error: ${errorMsg}`);
+        res.status(500).json({
+          success: false,
+          error: `Failed to run deployment command: ${errorMsg}`,
+          logs: "",
+        });
+      }
+    },
+  );
   app.post("/exit", async (_req: Request, res: Response) => {
     console.log(
       chalk.yellow("\nReceived exit request, shutting down server..."),

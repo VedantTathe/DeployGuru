@@ -1,5 +1,8 @@
 import React, { useState } from "react";
-import { CheckCircleIcon, ExclamationIcon } from "@heroicons/react/24/outline";
+import {
+  CheckCircleIcon,
+  ExclamationTriangleIcon,
+} from "@heroicons/react/24/outline";
 
 interface DeploymentCheckProps {
   resourceName: string;
@@ -22,8 +25,8 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
     setStatus("loading");
 
     try {
-      // Call the deployment check API
-      const response = await fetch("/api/deployment/check", {
+      // Run the deployment check command
+      const response = await fetch("/api/deployment/run-command", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -31,6 +34,7 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
         body: JSON.stringify({
           resourceName,
           window: "10m",
+          command: `python -m standard_commandline_utility.deploy_api ${resourceName} --window 10m --stream-only --out extracted_logs.txt`,
         }),
       });
 
@@ -39,7 +43,14 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
       }
 
       const data = await response.json();
-      const { logs, prompt } = data;
+      const { logs, success } = data;
+
+      if (!success) {
+        throw new Error("Command execution failed");
+      }
+
+      // Generate a prompt for the logs
+      const prompt = `Please analyze these deployment logs for ${resourceName}:\n\n${logs}`;
 
       setStatus("success");
       onLogsExtracted(logs, prompt);
@@ -81,7 +92,7 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
           </span>
         ) : status === "error" ? (
           <span className="flex items-center gap-2">
-            <ExclamationIcon className="h-5 w-5" />
+            <ExclamationTriangleIcon className="h-5 w-5" />
             Check Failed
           </span>
         ) : (
