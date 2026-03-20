@@ -16,6 +16,7 @@ import {
 import { ErrorBoundary } from "react-error-boundary";
 import styled from "styled-components";
 import { Button, lightGray, vscBackground } from "../../components";
+import { DeploymentCheckButton } from "../../components/DeploymentCheckButton";
 import { useFindWidget } from "../../components/find/FindWidget";
 import TimelineItem from "../../components/gui/TimelineItem";
 import { NewSessionButton } from "../../components/mainInput/belowMainInput/NewSessionButton";
@@ -486,7 +487,7 @@ export function Chat() {
           }}
         >
           <div className="flex flex-row items-center justify-between pb-1 pl-0.5 pr-2">
-            <div className="xs:inline hidden">
+            <div className="xs:flex hidden items-center gap-2">
               {history.length === 0 && lastSessionId && !isInEdit && (
                 <NewSessionButton
                   onClick={async () => {
@@ -498,6 +499,18 @@ export function Chat() {
                   <span className="text-xs">Last Session</span>
                 </NewSessionButton>
               )}
+              <DeploymentCheckButton
+                resourceName="JalSaathi"
+                onLogsExtracted={(logs, prompt) => {
+                  // Send logs and prompt to chat
+                  const message = `\`\`\`deployment-analysis\n${logs}\n\`\`\`\n\n${prompt}`;
+                  // You can dispatch this to send message to agent
+                  console.log("Logs extracted:", logs);
+                }}
+                onError={(error) => {
+                  console.error("Deployment check failed:", error);
+                }}
+              />
             </div>
           </div>
           <FatalErrorIndicator />
