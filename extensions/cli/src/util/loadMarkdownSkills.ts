@@ -3,7 +3,6 @@ import fsPromises from "fs/promises";
 import * as path from "path";
 
 import { parseMarkdownRule } from "@continuedev/config-yaml";
-import { WalkerSync } from "ignore-walk";
 import { z } from "zod";
 
 import { env } from "../env.js";
@@ -44,15 +43,26 @@ function getFilePathsInSkillDirectory(
   const skillDir = path.dirname(skillFilePath);
   if (!fs.existsSync(skillDir)) return [];
 
-  const walker = new WalkerSync({
-    path: skillDir,
-    includeEmpty: false,
-    follow: false,
-  });
+  // Recursively get all files in the skill directory
+  const getAllFiles = (dir: string): string[] => {
+    const files: string[] = [];
+    try {
+      const items = fs.readdirSync(dir, { withFileTypes: true });
+      for (const item of items) {
+        const fullPath = path.join(dir, item.name);
+        if (item.isDirectory() && !item.name.startsWith(".")) {
+          files.push(...getAllFiles(fullPath));
+        } else if (item.isFile()) {
+          files.push(fullPath);
+        }
+      }
+    } catch {
+      // Silently ignore read errors
+    }
+    return files;
+  };
 
-  const files = walker.start().result as string[];
-  return files
-    .map((filePath) => path.join(skillDir, filePath))
+  return getAllFiles(skillDir)
     .filter((filePath) => !filePath.endsWith("SKILL.md"))
     .map((filePath) => getRelativePath(cwd, filePath));
 }

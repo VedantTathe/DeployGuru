@@ -369,10 +369,23 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
     });
   });
 
+  // OPTIONS /api/deployment/run-command - Handle CORS preflight requests
+  app.options("/api/deployment/run-command", (req: Request, res: Response) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "POST, OPTIONS, GET");
+    res.header("Access-Control-Allow-Headers", "Content-Type");
+    res.sendStatus(200);
+  });
+
   // POST /api/deployment/run-command - Run deployment check command and read logs
   app.post(
     "/api/deployment/run-command",
     async (req: Request, res: Response) => {
+      // Add CORS headers for browser requests
+      res.header("Access-Control-Allow-Origin", "*");
+      res.header("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.header("Access-Control-Allow-Headers", "Content-Type");
+
       state.lastActivity = Date.now();
 
       try {
@@ -421,14 +434,21 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
               `Successfully read logs from ${logsFilePath} (${logs.length} bytes)`,
             );
           } else {
-            logs =
-              commandOutput ||
-              "No logs file found and no command output available";
+            // No logs file - return error instead of mock data
             logger.warn(`Logs file not found at ${logsFilePath}`);
+            return res.status(500).json({
+              success: false,
+              error: `No logs found for resource "${resourceName}". Make sure AWS credentials are configured and the resource has recent deployment activity.`,
+              logs: "",
+            });
           }
         } catch (fileError: any) {
           logger.error(`Failed to read logs file: ${fileError.message}`);
-          logs = commandOutput || `Error reading logs: ${fileError.message}`;
+          return res.status(500).json({
+            success: false,
+            error: `Error reading logs: ${fileError.message}`,
+            logs: "",
+          });
         }
 
         res.json({
