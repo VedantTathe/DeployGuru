@@ -93,14 +93,20 @@ export class VsCodeWebviewProtocol
           let message = e.message;
           respond({ done: true, error: message, status: "error" });
 
-          const stringified = JSON.stringify({ msg }, null, 2);
+          let stringified = "";
+          try {
+            stringified = JSON.stringify({ msg }, null, 2);
+          } catch (stringifyError) {
+            stringified = "[Unable to stringify message]";
+          }
           console.error(
             `Error handling webview message: ${stringified}\n\n${e}`,
           );
 
           if (
-            stringified.includes("llm/streamChat") ||
-            stringified.includes("chatDescriber/describe")
+            stringified &&
+            (stringified.includes("llm/streamChat") ||
+              stringified.includes("chatDescriber/describe"))
           ) {
             return;
           }

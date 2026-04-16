@@ -433,12 +433,32 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
             logger.info(
               `Successfully read logs from ${logsFilePath} (${logs.length} bytes)`,
             );
+
+            // Check if logs are empty
+            if (logs.trim() === "") {
+              logger.warn(
+                "Logs file is empty - no events in the requested window",
+              );
+              return res.status(500).json({
+                success: false,
+                error: `No log streams have events in the requested window for resource "${resourceName}".`,
+                logs: "",
+              });
+            }
+
+            return res.json({
+              success: true,
+              logs: logs,
+              resourceName: resourceName,
+              fileExists: fileExists,
+              timestamp: new Date().toISOString(),
+            });
           } else {
             // No logs file - return error instead of mock data
             logger.warn(`Logs file not found at ${logsFilePath}`);
             return res.status(500).json({
               success: false,
-              error: `No logs found for resource "${resourceName}". Make sure AWS credentials are configured and the resource has recent deployment activity.`,
+              error: `No log streams have events in the requested window for resource "${resourceName}".`,
               logs: "",
             });
           }
@@ -450,14 +470,6 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
             logs: "",
           });
         }
-
-        res.json({
-          success: true,
-          logs: logs,
-          resourceName: resourceName,
-          fileExists: fileExists,
-          timestamp: new Date().toISOString(),
-        });
       } catch (error) {
         const errorMsg = formatError(error);
         logger.error(`Deployment endpoint error: ${errorMsg}`);

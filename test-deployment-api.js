@@ -86,23 +86,50 @@ app.post("/api/deployment/run-command", async (req, res) => {
         console.log(
           `✅ Successfully read logs from ${logsFilePath} (${logs.length} bytes)`,
         );
+
+        // Check if logs are empty - be very explicit
+        const isLogsEmpty = logs === "" || logs === null || logs.trim() === "";
+        console.log(
+          `📊 Logs empty check: ${isLogsEmpty} (logs length: ${logs.length})`,
+        );
+
+        if (isLogsEmpty) {
+          console.warn(
+            `⚠️  Logs file is empty - returning NO LOGS error response`,
+          );
+          return res.status(500).json({
+            success: false,
+            error: `No log streams have events in the requested window for resource "${resourceName}".`,
+            logs: "",
+          });
+        }
+
+        console.log(`✓ Logs have content, returning success response`);
+        // Return success response
+        return res.json({
+          success: true,
+          logs: logs,
+          resourceName: resourceName,
+          fileExists: fileExists,
+          timestamp: new Date().toISOString(),
+        });
       } else {
-        logs =
-          commandOutput || "No logs file found and no command output available";
+        // No logs file - return proper error
         console.warn(`⚠️  Logs file not found at ${logsFilePath}`);
+        return res.status(500).json({
+          success: false,
+          error: `No log streams have events in the requested window for resource "${resourceName}".`,
+          logs: "",
+        });
       }
     } catch (fileError) {
       console.error(`❌ Failed to read logs file: ${fileError.message}`);
-      logs = commandOutput || `Error reading logs: ${fileError.message}`;
+      return res.status(500).json({
+        success: false,
+        error: `Error reading logs: ${fileError.message}`,
+        logs: "",
+      });
     }
-
-    res.json({
-      success: true,
-      logs: logs,
-      resourceName: resourceName,
-      fileExists: fileExists,
-      timestamp: new Date().toISOString(),
-    });
   } catch (error) {
     console.error(`❌ Deployment endpoint error: ${error.message}`);
     res.status(500).json({
