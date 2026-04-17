@@ -80,7 +80,10 @@ export class ContinueGUIWebviewViewProvider
 
     const inDevelopmentMode =
       context?.extensionMode === vscode.ExtensionMode.Development;
-    if (inDevelopmentMode) {
+    const useViteDevServer =
+      inDevelopmentMode && process.env.CONTINUE_USE_VITE_DEV_SERVER === "true";
+
+    if (useViteDevServer) {
       scriptUri = "http://localhost:5173/src/main.tsx";
       styleMainUri = "http://localhost:5173/src/index.css";
     } else {
@@ -141,7 +144,7 @@ export class ContinueGUIWebviewViewProvider
         <div id="root"></div>
 
         ${
-          inDevelopmentMode
+          useViteDevServer
             ? `<script type="module">
           import RefreshRuntime from "http://localhost:5173/@react-refresh"
           RefreshRuntime.injectIntoGlobalHook(window)

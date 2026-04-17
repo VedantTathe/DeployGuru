@@ -1,10 +1,42 @@
 const fs = require("fs");
+const path = require("path");
 
 const { writeBuildTimestamp } = require("./utils");
 
 const esbuild = require("esbuild");
 
 const flags = process.argv.slice(2);
+
+function copySqliteNativeBindingsIfAvailable() {
+  const sqliteBuildDir = "../../core/node_modules/sqlite3/build";
+  const sqliteBinary = `${sqliteBuildDir}/Release/node_sqlite3.node`;
+
+  if (!fs.existsSync(sqliteBinary)) {
+    console.warn(
+      "[warn] sqlite3 native binary not found in core; skipping sqlite binding copy",
+    );
+    return;
+  }
+
+  fs.mkdirSync("build", { recursive: true });
+  fs.mkdirSync("out", { recursive: true });
+
+  // Keep both legacy lookup paths populated for extension host activation.
+  fs.cpSync(sqliteBuildDir, "build", { recursive: true });
+  fs.cpSync(sqliteBuildDir, "out", { recursive: true });
+
+  // Also populate direct/native lookup locations used by bindings().
+  fs.copyFileSync(sqliteBinary, "build/node_sqlite3.node");
+  fs.copyFileSync(sqliteBinary, "out/node_sqlite3.node");
+
+  const bindingDir = path.join(
+    "lib",
+    "binding",
+    `node-v${process.versions.modules}-${process.platform}-${process.arch}`,
+  );
+  fs.mkdirSync(bindingDir, { recursive: true });
+  fs.copyFileSync(sqliteBinary, path.join(bindingDir, "node_sqlite3.node"));
+}
 
 const esbuildConfig = {
   entryPoints: ["src/extension.ts"],
@@ -51,6 +83,8 @@ const esbuildConfig = {
 };
 
 void (async () => {
+  copySqliteNativeBindingsIfAvailable();
+
   // Create .buildTimestamp.js before starting the first build
   writeBuildTimestamp();
   // Bundles the extension into one file

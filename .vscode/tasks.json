@@ -21,10 +21,10 @@
       "label": "vscode-extension:build",
       "dependsOn": [
         "tsc:watch",
+        "gui:build",
         "vscode-extension:continue-ui:build",
         "vscode-extension:esbuild",
-        "vscode-extension:esbuild-notify",
-        "gui:dev"
+        "vscode-extension:esbuild-notify"
       ],
       "group": {
         "kind": "build",
@@ -407,6 +407,36 @@
         "reveal": "silent",
         "close": true,
         "focus": false
+      }
+    },
+    {
+      "label": "gui:build",
+      "type": "npm",
+      "script": "build",
+      "path": "gui",
+      "group": "build",
+      "presentation": {
+        "group": "build-tasks",
+        "panel": "shared",
+        "reveal": "always",
+        "close": true
+      },
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "copy-gui-files",
+      "type": "shell",
+      "command": "sh",
+      "args": [
+        "-c",
+        "mkdir -p extensions/vscode/gui && cp -r gui/dist/* extensions/vscode/gui/"
+      ],
+      "group": "build",
+      "presentation": {
+        "group": "build-tasks",
+        "panel": "shared",
+        "reveal": "silent",
+        "close": true
       }
     }
   ]

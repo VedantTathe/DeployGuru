@@ -1,6 +1,5 @@
 import { ConfigResult } from "@continuedev/config-yaml";
 import { open, type Database } from "sqlite";
-import sqlite3 from "sqlite3";
 
 import {
   Chunk,
@@ -882,6 +881,7 @@ export default class DocsService {
   // SQLITE DB
   private async getOrCreateSqliteDb() {
     if (!this.sqliteDb) {
+      const sqlite3 = await import("sqlite3");
       const db = await open({
         filename: getDocsSqlitePath(),
         driver: sqlite3.Database,

@@ -511,7 +511,7 @@ export abstract class BaseLLM implements ILLM {
           }
           if (
             e.code === "ECONNREFUSED" &&
-            e.message.includes("http://localhost:8000")
+            e.message.includes("http://localhost:8080")
           ) {
             const isInstalled = await isLemonadeInstalled();
             let message: string;

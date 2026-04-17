@@ -1,7 +1,7 @@
 /**
  * Simple Node.js Express server to test the deployment check API
  * Run: node test-deployment-api.js
- * Then test: curl -X POST http://localhost:8000/api/deployment/run-command -H "Content-Type: application/json" -d '{"resourceName":"JalSaathi","window":"10m"}'
+ * Then test: curl -X POST http://localhost:8080/api/deployment/run-command -H "Content-Type: application/json" -d '{"resourceName":"JalSaathi","window":"10m"}'
  */
 
 const express = require("express");
@@ -10,7 +10,8 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
-const PORT = 8000;
+const PORT = Number(process.env.PORT || 8080);
+const HOST = process.env.HOST || "0.0.0.0";
 
 // Middleware
 app.use(express.json());
@@ -140,7 +141,7 @@ app.post("/api/deployment/run-command", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(`
 ╔════════════════════════════════════════════════════════╗
 ║  🚀 Test Deployment API Server Running!               ║
@@ -165,3 +166,42 @@ Press CTRL+C to stop the server
 ════════════════════════════════════════════════════════
   `);
 });
+
+server.on("error", (error) => {
+  console.error("❌ Server error:", error.message);
+});
+
+server.on("close", () => {
+  console.warn("⚠️  Server closed.");
+});
+
+process.on("beforeExit", (code) => {
+  console.warn(`⚠️  Node beforeExit with code ${code}`);
+});
+
+process.on("exit", (code) => {
+  console.warn(`ℹ️  Node process exiting with code ${code}`);
+});
+
+process.on("SIGTERM", () => {
+  console.warn("⚠️  Received SIGTERM, shutting down test server...");
+  server.close(() => process.exit(0));
+});
+
+process.on("SIGINT", () => {
+  console.warn("⚠️  Received SIGINT, shutting down test server...");
+  server.close(() => process.exit(0));
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("❌ Uncaught exception:", error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("❌ Unhandled rejection:", reason);
+});
+
+// Keep stdin open in environments that may auto-exit background-like processes.
+if (!process.stdin.isTTY) {
+  process.stdin.resume();
+}

@@ -4,6 +4,24 @@ import {
 } from "@heroicons/react/24/outline";
 import React, { useState } from "react";
 
+const DEFAULT_DEPLOYMENT_API_BASE_URL = "http://localhost:8080";
+const FALLBACK_DEPLOYMENT_API_BASE_URL = "http://localhost:8000";
+const DEPLOYMENT_API_BASE_URL =
+  import.meta.env.VITE_DEPLOYMENT_API_BASE_URL ||
+  DEFAULT_DEPLOYMENT_API_BASE_URL;
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return "Unknown error occurred";
+};
+
 interface DeploymentCheckProps {
   resourceName: string;
   onLogsExtracted: (logs: string, prompt: string) => void;
@@ -71,8 +89,121 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [extractedLogs, setExtractedLogs] = useState("");
   const [timeWindow, setTimeWindow] = useState("1000h");
+  const [liveSessionId, setLiveSessionId] = useState<string | null>(null);
+
+  const callDeploymentApi = async (
+    endpoint: string,
+    method: "GET" | "POST",
+    body?: Record<string, any>,
+  ): Promise<{ response: Response; activeApiBaseUrl: string }> => {
+    const execute = (baseUrl: string) =>
+      fetch(`${baseUrl}${endpoint}`, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+
+    let activeApiBaseUrl = DEPLOYMENT_API_BASE_URL;
+    try {
+      const response = await execute(activeApiBaseUrl);
+      return { response, activeApiBaseUrl };
+    } catch (primaryError) {
+      const shouldTryFallback =
+        !import.meta.env.VITE_DEPLOYMENT_API_BASE_URL &&
+        activeApiBaseUrl === DEFAULT_DEPLOYMENT_API_BASE_URL;
+
+      if (!shouldTryFallback) {
+        throw primaryError;
+      }
+
+      activeApiBaseUrl = FALLBACK_DEPLOYMENT_API_BASE_URL;
+      const response = await execute(activeApiBaseUrl);
+      return { response, activeApiBaseUrl };
+    }
+  };
+
+  const startLiveCheck = async () => {
+    setIsLoading(true);
+    setStatus("loading");
+    try {
+      const { response } = await callDeploymentApi(
+        "/api/deployment/live/start",
+        "POST",
+        {
+          resourceName: resourceName || "JalSaathiStack",
+          pollIntervalSeconds: 15,
+          pollWindow: "2m",
+        },
+      );
+
+      const data = await response.json();
+      if (!response.ok || !data.success || !data.sessionId) {
+        throw new Error(data.error || "Failed to start live deployment check");
+      }
+
+      setLiveSessionId(data.sessionId);
+      setStatus("success");
+      alert(
+        "✅ Live deployment capture started. Explore your website now, then click 'Stop Check Deployment' to analyze captured errors.",
+      );
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      setStatus("error");
+      onError(errorMessage);
+      alert(`❌ Failed to start live capture\n\n${errorMessage}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const stopLiveCheck = async () => {
+    if (!liveSessionId) return;
+    setIsLoading(true);
+    setStatus("loading");
+    try {
+      const { response } = await callDeploymentApi(
+        "/api/deployment/live/stop",
+        "POST",
+        {
+          sessionId: liveSessionId,
+        },
+      );
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to stop live deployment check");
+      }
+
+      setLiveSessionId(null);
+      setExtractedLogs(data.logs || "");
+      setShowConfirmation(true);
+      setStatus("success");
+
+      const summary = data.summary || {};
+      alert(
+        `✅ Live capture stopped\n\nTotal lines: ${summary.totalLines || 0}\nErrors: ${summary.errorCount || 0}\nWarnings: ${summary.warningCount || 0}\n\nReview logs and confirm to process with AI.`,
+      );
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      setStatus("error");
+      onError(errorMessage);
+      alert(`❌ Failed to stop live capture\n\n${errorMessage}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleCheckDeployment = async () => {
+    if (liveSessionId) {
+      await stopLiveCheck();
+      return;
+    }
+
+    await startLiveCheck();
+    return;
+
     setIsLoading(true);
     setStatus("loading");
     const window = "1h"; // Last 42 days
@@ -85,23 +216,47 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
       }
 
       console.log(
-        "[DeploymentCheck] Calling API: http://localhost:8000/api/deployment/run-command",
+        `[DeploymentCheck] Calling API: ${DEPLOYMENT_API_BASE_URL}/api/deployment/run-command`,
       );
 
-      // Call backend API to extract real logs
-      const response = await fetch(
-        "http://localhost:8000/api/deployment/run-command",
-        {
+      // Call backend API to extract real logs.
+      // If default port is not reachable, retry test server port once.
+      const requestBody = JSON.stringify({
+        resourceName,
+        window: "1h",
+      });
+
+      const callDeploymentApi = (baseUrl: string) =>
+        fetch(`${baseUrl}/api/deployment/run-command`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            resourceName,
-            window: "1h",
-          }),
-        },
-      );
+          body: requestBody,
+        });
+
+      let response: Response;
+      let activeApiBaseUrl = DEPLOYMENT_API_BASE_URL;
+
+      try {
+        response = await callDeploymentApi(activeApiBaseUrl);
+      } catch (primaryError) {
+        const shouldTryFallback =
+          !import.meta.env.VITE_DEPLOYMENT_API_BASE_URL &&
+          activeApiBaseUrl === DEFAULT_DEPLOYMENT_API_BASE_URL;
+
+        if (!shouldTryFallback) {
+          throw primaryError;
+        }
+
+        console.warn(
+          `[DeploymentCheck] Primary API unreachable on ${DEFAULT_DEPLOYMENT_API_BASE_URL}, retrying ${FALLBACK_DEPLOYMENT_API_BASE_URL}`,
+        );
+        activeApiBaseUrl = FALLBACK_DEPLOYMENT_API_BASE_URL;
+        response = await callDeploymentApi(activeApiBaseUrl);
+      }
+
+      console.log(`[DeploymentCheck] Using API base URL: ${activeApiBaseUrl}`);
 
       console.log("[DeploymentCheck] API Response status:", response.status);
       console.log("[DeploymentCheck] API Response ok:", response.ok);
@@ -196,14 +351,13 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
       setStatus("success");
       setIsLoading(false);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error occurred";
+      const errorMessage = getErrorMessage(error);
       console.error("[DeploymentCheck] Catch Error:", errorMessage);
       console.error("[DeploymentCheck] Full error:", error);
 
       // Provide helpful error message
       const helpfulMessage = errorMessage.includes("ECONNREFUSED")
-        ? "Cannot connect to backend. Ensure the deployment API server is running on port 8000."
+        ? "Cannot connect to backend. Ensure deployment API server is running on port 8000 or 8080."
         : errorMessage.includes("AWS")
           ? "AWS credentials issue. Please configure AWS credentials."
           : errorMessage.includes("API responded")
@@ -314,8 +468,7 @@ START RequestId: 0dc73a73-1af4-4b7f-8a86-495d8978c735 Version: $LATEST
       setShowConfirmation(false);
       onLogsExtracted(extractedLogs, prompt);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error occurred";
+      const errorMessage = getErrorMessage(error);
       setStatus("error");
       onError(errorMessage);
     } finally {
@@ -362,35 +515,46 @@ START RequestId: 0dc73a73-1af4-4b7f-8a86-495d8978c735 Version: $LATEST
                 ? "cursor-pointer bg-orange-600 hover:bg-orange-700"
                 : status === "no-logs"
                   ? "cursor-pointer bg-blue-400 hover:bg-blue-500"
-                  : status === "success"
-                    ? "bg-green-600 hover:bg-green-700"
-                    : "bg-blue-600 hover:bg-blue-700"
+                  : liveSessionId
+                    ? "bg-red-600 hover:bg-red-700"
+                    : status === "success"
+                      ? "bg-green-600 hover:bg-green-700"
+                      : "bg-blue-600 hover:bg-blue-700"
           } text-white`}
         >
           {isLoading ? (
             <span className="flex items-center gap-2">
               <span className="animate-spin">⟳</span>
-              Checking Deployment...
+              {liveSessionId ? "Stopping Capture..." : "Starting Capture..."}
+            </span>
+          ) : liveSessionId ? (
+            <span className="flex items-center gap-2">
+              ⏹ Stop Check Deployment
             </span>
           ) : status === "success" ? (
             <span className="flex items-center gap-2">
               <CheckCircleIcon className="h-5 w-5" />
-              Logs Extracted
+              Start Check Deployment
             </span>
           ) : status === "error" ? (
             <span className="flex items-center gap-2">
               <ExclamationTriangleIcon className="h-5 w-5" />
-              Retry Check
+              Retry Start
             </span>
           ) : status === "no-logs" ? (
             <span className="flex items-center gap-2">
               <span>ℹ️</span>
-              Try Different Range
+              Start Check Deployment
             </span>
           ) : (
-            "Check Deployment"
+            "Start Check Deployment"
           )}
         </button>
+        {liveSessionId && (
+          <p className="text-sm text-red-600">
+            🔴 Live capture running for Lambda logs. Reproduce issue, then stop.
+          </p>
+        )}
         {status === "success" && !showConfirmation && (
           <p className="text-sm text-green-600">
             ✓ Waiting for confirmation...

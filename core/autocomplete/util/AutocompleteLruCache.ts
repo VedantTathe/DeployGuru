@@ -1,6 +1,5 @@
 import { Mutex } from "async-mutex";
 import { open } from "sqlite";
-import sqlite3 from "sqlite3";
 import {
   DatabaseConnection,
   truncateSqliteLikePattern,
@@ -39,6 +38,7 @@ export class AutocompleteLruCache {
   static async get(): Promise<AutocompleteLruCache> {
     if (!AutocompleteLruCache.instancePromise) {
       AutocompleteLruCache.instancePromise = (async () => {
+        const sqlite3 = await import("sqlite3");
         const db = await open({
           filename: getTabAutocompleteCacheSqlitePath(),
           driver: sqlite3.Database,

@@ -403,6 +403,7 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
         // Execute the command
         let commandOutput = "";
         let execError = null;
+        let errorOutput = "";
 
         try {
           commandOutput = execSync(deployCommand, {
@@ -414,6 +415,10 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
         } catch (error: any) {
           // Command may fail, but logs file might still be created
           execError = error;
+          errorOutput =
+            typeof error?.stderr === "string"
+              ? error.stderr
+              : error?.stderr?.toString?.() || error?.message || "";
           logger.warn(`Command execution failed: ${error.message}`);
           // Continue - we'll check for the logs file anyway
         }
@@ -436,12 +441,16 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
 
             // Check if logs are empty
             if (logs.trim() === "") {
+              const detailedError =
+                execError && errorOutput
+                  ? `Deployment command failed: ${errorOutput.substring(0, 1200)}`
+                  : `No log streams have events in the requested window for resource "${resourceName}".`;
               logger.warn(
                 "Logs file is empty - no events in the requested window",
               );
               return res.status(500).json({
                 success: false,
-                error: `No log streams have events in the requested window for resource "${resourceName}".`,
+                error: detailedError,
                 logs: "",
               });
             }
@@ -455,10 +464,14 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
             });
           } else {
             // No logs file - return error instead of mock data
+            const detailedError =
+              execError && errorOutput
+                ? `Deployment command failed: ${errorOutput.substring(0, 1200)}`
+                : `No log streams have events in the requested window for resource "${resourceName}".`;
             logger.warn(`Logs file not found at ${logsFilePath}`);
             return res.status(500).json({
               success: false,
-              error: `No log streams have events in the requested window for resource "${resourceName}".`,
+              error: detailedError,
               logs: "",
             });
           }

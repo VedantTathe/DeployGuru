@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 
 import plimit from "p-limit";
 import { open, type Database } from "sqlite";
-import sqlite3 from "sqlite3";
 
 import { FileStatsMap, IndexTag, IndexingProgressUpdate } from "../index.js";
 import { getIndexSqlitePath } from "../util/paths.js";
@@ -16,7 +15,9 @@ import {
   RefreshIndexResults,
 } from "./types.js";
 
-export type DatabaseConnection = Database<sqlite3.Database>;
+type Sqlite3Database = import("sqlite3").Database;
+
+export type DatabaseConnection = Database<Sqlite3Database>;
 
 export class SqliteDb {
   static db: DatabaseConnection | null = null;
@@ -95,6 +96,7 @@ export class SqliteDb {
     }
 
     SqliteDb.indexSqlitePath = getIndexSqlitePath();
+    const sqlite3 = await import("sqlite3");
     SqliteDb.db = await open({
       filename: SqliteDb.indexSqlitePath,
       driver: sqlite3.Database,

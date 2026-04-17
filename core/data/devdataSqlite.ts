@@ -1,15 +1,15 @@
 import fs from "fs";
 
 import { open } from "sqlite";
-import sqlite3 from "sqlite3";
 
-import { DatabaseConnection } from "../indexing/refreshIndex.js";
+import type { DatabaseConnection } from "../indexing/refreshIndex.js";
 
 import { getDevDataSqlitePath } from "../util/paths.js";
 
 /* The Dev Data SQLITE table is only used for local tokens generated */
 export class DevDataSqliteDb {
   static db: DatabaseConnection | null = null;
+  private static sqliteLoadFailed = false;
 
   private static async createTables(db: DatabaseConnection) {
     await db.exec(
@@ -78,9 +78,23 @@ export class DevDataSqliteDb {
       return DevDataSqliteDb.db;
     }
 
+    let sqlite3: any;
+    try {
+      sqlite3 = await import("sqlite3");
+    } catch (error) {
+      if (!DevDataSqliteDb.sqliteLoadFailed) {
+        DevDataSqliteDb.sqliteLoadFailed = true;
+        console.warn(
+          "[DevDataSqliteDb] sqlite3 native bindings are unavailable; skipping local token logging.",
+          error,
+        );
+      }
+      return null;
+    }
+
     DevDataSqliteDb.db = await open({
       filename: devDataSqlitePath,
-      driver: sqlite3.Database,
+      driver: sqlite3.default.Database,
     });
 
     await DevDataSqliteDb.db.exec("PRAGMA busy_timeout = 3000;");
