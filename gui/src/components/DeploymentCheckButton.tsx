@@ -4,24 +4,72 @@ import {
 } from "@heroicons/react/24/outline";
 import React, { useState } from "react";
 
-// Detect if running in Codespaces and construct the proper URL
-const getDeploymentApiBaseUrl = (): string => {
-  // Check if we have an explicit environment variable
-  if (import.meta.env.VITE_DEPLOYMENT_API_BASE_URL) {
-    console.log("[DEBUG] 🔧 Using VITE_DEPLOYMENT_API_BASE_URL from env");
-    return import.meta.env.VITE_DEPLOYMENT_API_BASE_URL;
-  }
+// Detect if we're in Codespaces environment
+let IS_CODESPACES = false;
+let CODESPACES_API_BASE_URL = "";
 
-  // For Codespaces, use the hardcoded forwarded URL
-  // This is the public HTTPS URL that works from the extension sandbox
-  const codespaceUrl =
-    "https://jubilant-space-happiness-9gpv9xrq6q7fx4xj-8080.app.github.dev";
-  console.log("[DEBUG] 🔗 Using Codespaces forwarded URL:", codespaceUrl);
-  return codespaceUrl;
+const getCodespaceNameFromHost = (host: string): string => {
+  const appMatch = host.match(/^([a-z0-9\-]+)-\d+\.app\.github\.dev$/);
+  if (appMatch) return appMatch[1];
+
+  const devMatch = host.match(/^([a-z0-9\-]+)\.github\.dev$/);
+  if (devMatch) return devMatch[1];
+
+  return "";
 };
 
-const DEFAULT_DEPLOYMENT_API_BASE_URL = getDeploymentApiBaseUrl();
-const FALLBACK_DEPLOYMENT_API_BASE_URL = "http://localhost:8000";
+const getHostnameFromUrl = (value: string): string => {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return "";
+  }
+};
+
+try {
+  const hostname =
+    typeof window !== "undefined" ? window.location.hostname : "";
+  const ancestorHosts =
+    typeof window !== "undefined" && window.location.ancestorOrigins
+      ? Array.from(window.location.ancestorOrigins).map(getHostnameFromUrl)
+      : [];
+  const referrerHost =
+    typeof document !== "undefined"
+      ? getHostnameFromUrl(document.referrer)
+      : "";
+
+  const candidates = [hostname, referrerHost, ...ancestorHosts].filter(Boolean);
+
+  for (const host of candidates) {
+    if (!host.includes("github.dev")) {
+      continue;
+    }
+
+    IS_CODESPACES = true;
+    const codespaceName = getCodespaceNameFromHost(host);
+    if (codespaceName && codespaceName !== "assets") {
+      CODESPACES_API_BASE_URL = `https://${codespaceName}-8080.app.github.dev`;
+      console.log(
+        "[DEBUG] 🔗 Detected Codespaces environment:",
+        CODESPACES_API_BASE_URL,
+      );
+      break;
+    }
+  }
+} catch (e) {
+  console.log("[DEBUG] ⚠️ Could not detect Codespaces:", e);
+}
+
+const LOCALHOST_API_BASE_URL = "http://localhost:8080";
+
+// In Codespaces, TRY localhost first (works via service worker tunnel)
+// Then fall back to port-forwarded URL if that fails
+let DEFAULT_DEPLOYMENT_API_BASE_URL =
+  import.meta.env.VITE_DEPLOYMENT_API_BASE_URL || LOCALHOST_API_BASE_URL;
+
+// Set fallback to port-forwarded URL in Codespaces
+const FALLBACK_DEPLOYMENT_API_BASE_URL =
+  IS_CODESPACES && CODESPACES_API_BASE_URL ? CODESPACES_API_BASE_URL : "";
 const DEPLOYMENT_API_BASE_URL = DEFAULT_DEPLOYMENT_API_BASE_URL;
 
 const getErrorMessage = (error: unknown): string => {
@@ -209,7 +257,8 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
 
       const shouldTryFallback =
         !import.meta.env.VITE_DEPLOYMENT_API_BASE_URL &&
-        activeApiBaseUrl === DEFAULT_DEPLOYMENT_API_BASE_URL;
+        activeApiBaseUrl === DEFAULT_DEPLOYMENT_API_BASE_URL &&
+        FALLBACK_DEPLOYMENT_API_BASE_URL;
 
       if (!shouldTryFallback) {
         console.error(`[DEBUG] No fallback available, throwing error`);

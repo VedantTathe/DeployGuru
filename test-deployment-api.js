@@ -19,17 +19,24 @@ const activeSessions = new Map();
 // Middleware
 app.use(express.json());
 
-// CORS headers middleware
+// Simple CORS middleware - allow everything
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.header("Access-Control-Allow-Credentials", "true");
-  // Prevent authentication prompts
-  res.header("WWW-Authenticate", "none");
+  res.header(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
+  );
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Accept, Authorization, X-Requested-With, Origin",
+  );
+  res.header("Access-Control-Max-Age", "86400");
+
+  // Handle preflight (OPTIONS) requests
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
+
   next();
 });
 

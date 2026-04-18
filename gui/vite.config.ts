@@ -9,15 +9,14 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    sentryVitePlugin({
-      org: "continue-xd",
-      project: "continue",
-    }),
+    // sentryVitePlugin({
+    //   org: "continue-xd",
+    //   project: "continue",
+    // }),
   ],
   build: {
-    sourcemap: true,
-
-    // Change the output .js filename to not include a hash
+    sourcemap: false,
+    minify: false,
     rollupOptions: {
       input: {
         index: resolve(__dirname, "index.html"),
@@ -27,6 +26,8 @@ export default defineConfig({
         entryFileNames: `assets/[name].js`,
         chunkFileNames: `assets/[name].js`,
         assetFileNames: `assets/[name].[ext]`,
+        // Disable chunk splitting to reduce rendering complexity
+        manualChunks: undefined,
       },
     },
   },

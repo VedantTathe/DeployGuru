@@ -143,14 +143,14 @@ class IPCMessengerBase<
     data: FromProtocol[T][0],
     messageId?: string,
   ): string {
-    messageId = messageId ?? uuidv4();
+    const id = (messageId ?? uuidv4()) as string;
     const msg: Message = {
       messageType: messageType as string,
       data,
-      messageId,
+      messageId: id,
     };
     this._sendMsg(msg);
-    return messageId;
+    return id;
   }
 
   invoke<T extends keyof ToProtocol>(

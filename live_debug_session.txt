@@ -1,22 +1,19 @@
 [LIVE DEBUG SESSION LOGS]
 Resource: JalSaathi
-Session ID: session_1776516939668_i3fgu2qys
-Started: 2026-04-18T12:55:39.668Z
-Ended: 2026-04-18T12:56:13.183Z
-Duration: 34s
+Session ID: session_1776544226004_joacchq8u
+Started: 2026-04-18T20:30:26.004Z
+Ended: 2026-04-18T20:30:51.218Z
+Duration: 25s
 Poll Interval: 15s
 Poll Window: 2m
-Total Polls: 2
-Total Log Entries: 5
+Total Polls: 1
+Total Log Entries: 2
 
 ════════════════════════════════════════════════════════════
 
 COLLECTED LOGS:
 
-2026-04-18T12:55:53.920Z [ERROR] [database] Connection timeout
-2026-04-18T12:55:53.867Z [INFO] [service-b] Data validated
-2026-04-18T12:55:54.373Z [WARN] [service-a] Query executed
-2026-04-18T12:56:09.665Z [WARN] [database] Cache hit
-2026-04-18T12:56:09.659Z [DEBUG] [database] Cache hit
+2026-04-18T20:30:40.458Z [ERROR] [auth] Query executed
+2026-04-18T20:30:40.454Z [DEBUG] [database] Processing data
 
 ════════════════════════════════════════════════════════════
