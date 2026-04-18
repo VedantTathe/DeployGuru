@@ -4,11 +4,25 @@ import {
 } from "@heroicons/react/24/outline";
 import React, { useState } from "react";
 
-const DEFAULT_DEPLOYMENT_API_BASE_URL = "http://localhost:8080";
+// Detect if running in Codespaces and construct the proper URL
+const getDeploymentApiBaseUrl = (): string => {
+  // Check if we have an explicit environment variable
+  if (import.meta.env.VITE_DEPLOYMENT_API_BASE_URL) {
+    console.log("[DEBUG] 🔧 Using VITE_DEPLOYMENT_API_BASE_URL from env");
+    return import.meta.env.VITE_DEPLOYMENT_API_BASE_URL;
+  }
+
+  // For Codespaces, use the hardcoded forwarded URL
+  // This is the public HTTPS URL that works from the extension sandbox
+  const codespaceUrl =
+    "https://jubilant-space-happiness-9gpv9xrq6q7fx4xj-8080.app.github.dev";
+  console.log("[DEBUG] 🔗 Using Codespaces forwarded URL:", codespaceUrl);
+  return codespaceUrl;
+};
+
+const DEFAULT_DEPLOYMENT_API_BASE_URL = getDeploymentApiBaseUrl();
 const FALLBACK_DEPLOYMENT_API_BASE_URL = "http://localhost:8000";
-const DEPLOYMENT_API_BASE_URL =
-  import.meta.env.VITE_DEPLOYMENT_API_BASE_URL ||
-  DEFAULT_DEPLOYMENT_API_BASE_URL;
+const DEPLOYMENT_API_BASE_URL = DEFAULT_DEPLOYMENT_API_BASE_URL;
 
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -45,31 +59,83 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  // Parse logs to show errors separately
+  const errorLines = logs
+    .split("\n")
+    .filter((line) => line.includes("ERROR") || line.includes("WARN"));
+  const errorCount = (logs.match(/\[ERROR\]/g) || []).length;
+  const warningCount = (logs.match(/\[WARN\]/g) || []).length;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="mx-4 flex max-h-96 w-full max-w-2xl flex-col rounded-lg bg-white p-6">
-        <h2 className="mb-4 text-xl font-bold">
-          Extracted Logs - Please Review
-        </h2>
-        <div className="mb-4 flex-1 overflow-y-auto rounded border border-gray-300 bg-gray-100 p-4">
-          <pre className="whitespace-pre-wrap break-words font-mono text-sm">
+      <div className="mx-4 flex max-h-screen w-full max-w-3xl flex-col rounded-lg bg-white p-6">
+        <h2 className="mb-2 text-2xl font-bold">🐛 Debug Logs Analysis</h2>
+
+        {/* Summary Bar */}
+        <div className="mb-4 flex gap-4 rounded-lg bg-gray-100 p-3">
+          <div className="flex items-center gap-1">
+            <span className="text-sm font-semibold text-gray-700">Errors:</span>
+            <span className="rounded bg-red-500 px-2 py-1 font-bold text-white">
+              {errorCount}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-sm font-semibold text-gray-700">
+              Warnings:
+            </span>
+            <span className="rounded bg-yellow-500 px-2 py-1 font-bold text-white">
+              {warningCount}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-sm font-semibold text-gray-700">
+              Total Lines:
+            </span>
+            <span className="rounded bg-blue-500 px-2 py-1 font-bold text-white">
+              {logs.split("\n").length}
+            </span>
+          </div>
+        </div>
+
+        {/* Errors Highlight */}
+        {errorCount > 0 && (
+          <div className="mb-4 rounded-lg border-2 border-red-500 bg-red-50 p-3">
+            <h3 className="mb-2 font-bold text-red-700">
+              ⛔ Critical Errors Found:
+            </h3>
+            <div className="max-h-32 space-y-1 overflow-y-auto">
+              {errorLines.map((line, idx) => (
+                <div key={idx} className="font-mono text-xs text-red-600">
+                  {line}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Full Logs */}
+        <div className="mb-4 flex-1 rounded border-2 border-gray-300 bg-gray-900 p-4">
+          <pre className="whitespace-pre-wrap break-words font-mono text-xs text-green-400">
             {logs}
           </pre>
         </div>
+
+        {/* Action Buttons */}
         <div className="flex justify-end gap-3">
           <button
             onClick={onCancel}
             disabled={isLoading}
-            className="rounded bg-gray-300 px-4 py-2 font-medium text-gray-800 hover:bg-gray-400 disabled:opacity-50"
+            className="rounded bg-gray-400 px-4 py-2 font-medium text-white hover:bg-gray-500 disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
             disabled={isLoading}
-            className="rounded bg-green-600 px-4 py-2 font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            className="flex items-center gap-2 rounded bg-green-600 px-4 py-2 font-medium text-white hover:bg-green-700 disabled:opacity-50"
           >
-            {isLoading ? "Sending..." : "Confirm & Send to AI"}
+            <span>✨</span>
+            {isLoading ? "Sending to AI..." : "Fix with AI"}
           </button>
         </div>
       </div>
@@ -96,74 +162,138 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
     method: "GET" | "POST",
     body?: Record<string, any>,
   ): Promise<{ response: Response; activeApiBaseUrl: string }> => {
-    const execute = (baseUrl: string) =>
-      fetch(`${baseUrl}${endpoint}`, {
+    const execute = (baseUrl: string) => {
+      const url = `${baseUrl}${endpoint}`;
+      console.log(`[DEBUG] 🌐 Fetching: ${method} ${url}`);
+      console.log(`[DEBUG] 📍 Full URL: ${url}`);
+      if (body) {
+        console.log(`[DEBUG] 📤 Request body:`, JSON.stringify(body, null, 2));
+      }
+      console.log(`[DEBUG] 🔄 Sending fetch request...`);
+
+      const fetchPromise = fetch(url, {
         method,
         headers: {
           "Content-Type": "application/json",
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
-      });
+      })
+        .then((response) => {
+          console.log(`[DEBUG] ✅ Fetch succeeded, status: ${response.status}`);
+          return response;
+        })
+        .catch((error) => {
+          console.error(`[DEBUG] ❌ Fetch failed with error:`, error);
+          console.error(`[DEBUG] Error code: ${(error as any).code}`);
+          console.error(`[DEBUG] Error message: ${error.message}`);
+          throw error;
+        });
+
+      console.log(`[DEBUG] ⏳ Fetch promise created, waiting for response...`);
+      return fetchPromise;
+    };
 
     let activeApiBaseUrl = DEPLOYMENT_API_BASE_URL;
     try {
+      console.log(`[DEBUG] 🔗 Trying primary API: ${activeApiBaseUrl}`);
       const response = await execute(activeApiBaseUrl);
+      console.log(
+        `[DEBUG] ✓ Primary API responded with status: ${response.status}`,
+      );
+      console.log(`[DEBUG] Response OK: ${response.ok}`);
       return { response, activeApiBaseUrl };
     } catch (primaryError) {
+      console.error(`[DEBUG] ❌ Primary API failed:`, primaryError);
+      console.error(`[DEBUG] Error type:`, (primaryError as Error).name);
+      console.error(`[DEBUG] Error message:`, (primaryError as Error).message);
+
       const shouldTryFallback =
         !import.meta.env.VITE_DEPLOYMENT_API_BASE_URL &&
         activeApiBaseUrl === DEFAULT_DEPLOYMENT_API_BASE_URL;
 
       if (!shouldTryFallback) {
+        console.error(`[DEBUG] No fallback available, throwing error`);
         throw primaryError;
       }
 
       activeApiBaseUrl = FALLBACK_DEPLOYMENT_API_BASE_URL;
+      console.log(`[DEBUG] 🔗 Trying fallback API: ${activeApiBaseUrl}`);
       const response = await execute(activeApiBaseUrl);
+      console.log(
+        `[DEBUG] ✓ Fallback API responded with status: ${response.status}`,
+      );
       return { response, activeApiBaseUrl };
     }
   };
 
   const startLiveCheck = async () => {
+    console.log("[DEBUG] 🐛 startLiveCheck() called");
+    console.log("[DEBUG] 📍 Current resourceName:", resourceName);
+    console.log("[DEBUG] 🔗 Using API Base URL:", DEPLOYMENT_API_BASE_URL);
+
     setIsLoading(true);
     setStatus("loading");
     try {
-      const { response } = await callDeploymentApi(
+      const requestBody = {
+        resourceName: resourceName || "JalSaathiStack",
+        pollIntervalSeconds: 15,
+        pollWindow: "2m",
+      };
+
+      console.log(`[DEBUG] 📡 About to call /api/deployment/live/start`);
+      console.log(`[DEBUG] 📤 Request body:`, requestBody);
+
+      const { response, activeApiBaseUrl } = await callDeploymentApi(
         "/api/deployment/live/start",
         "POST",
-        {
-          resourceName: resourceName || "JalSaathiStack",
-          pollIntervalSeconds: 15,
-          pollWindow: "2m",
-        },
+        requestBody,
       );
 
+      console.log(`[DEBUG] 📨 API Response received from ${activeApiBaseUrl}`);
+      console.log(`[DEBUG] Status: ${response.status}, OK: ${response.ok}`);
+
       const data = await response.json();
+      console.log(`[DEBUG] 📦 Response data:`, data);
+
       if (!response.ok || !data.success || !data.sessionId) {
-        throw new Error(data.error || "Failed to start live deployment check");
+        const errorMsg = data.error || "Failed to start debugging";
+        console.error(`[DEBUG] ❌ Start debug failed: ${errorMsg}`);
+        throw new Error(errorMsg);
       }
 
+      console.log(`[DEBUG] ✅ Session started with ID: ${data.sessionId}`);
       setLiveSessionId(data.sessionId);
       setStatus("success");
       alert(
-        "✅ Live deployment capture started. Explore your website now, then click 'Stop Check Deployment' to analyze captured errors.",
+        "🐛 Debug session started! Reproduce the issue now, then click 'Stop Debug' to analyze the logs.",
       );
     } catch (error) {
       const errorMessage = getErrorMessage(error);
+      console.error(`[DEBUG] 🚨 ERROR in startLiveCheck:`, errorMessage);
+      console.error(`[DEBUG] Error object:`, error);
       setStatus("error");
       onError(errorMessage);
-      alert(`❌ Failed to start live capture\n\n${errorMessage}`);
+      alert(`❌ Failed to start debug session\n\n${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
   };
 
   const stopLiveCheck = async () => {
-    if (!liveSessionId) return;
+    if (!liveSessionId) {
+      console.warn("[DEBUG] ⚠️ No sessionId available");
+      return;
+    }
+    console.log(
+      `[DEBUG] 🛑 stopLiveCheck() called with sessionId: ${liveSessionId}`,
+    );
     setIsLoading(true);
     setStatus("loading");
     try {
-      const { response } = await callDeploymentApi(
+      console.log(
+        `[DEBUG] 📡 Calling /api/deployment/live/stop with sessionId: ${liveSessionId}`,
+      );
+      const { response, activeApiBaseUrl } = await callDeploymentApi(
         "/api/deployment/live/stop",
         "POST",
         {
@@ -171,36 +301,60 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
         },
       );
 
+      console.log(`[DEBUG] 📨 API Response received from ${activeApiBaseUrl}`);
+      console.log(`[DEBUG] Status: ${response.status}, OK: ${response.ok}`);
+
       const data = await response.json();
+      console.log(
+        `[DEBUG] 📦 Response data (logs length: ${data.logs?.length || 0} chars):`,
+        data,
+      );
+
       if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to stop live deployment check");
+        const errorMsg = data.error || "Failed to stop debug session";
+        console.error(`[DEBUG] ❌ Stop debug failed: ${errorMsg}`);
+        throw new Error(errorMsg);
       }
 
+      console.log(`[DEBUG] ✅ Session stopped and logs received`);
       setLiveSessionId(null);
       setExtractedLogs(data.logs || "");
       setShowConfirmation(true);
       setStatus("success");
 
       const summary = data.summary || {};
+      console.log(
+        `[DEBUG] 📊 Summary - Lines: ${summary.totalLines || 0}, Errors: ${summary.errorCount || 0}, Warnings: ${summary.warningCount || 0}`,
+      );
       alert(
-        `✅ Live capture stopped\n\nTotal lines: ${summary.totalLines || 0}\nErrors: ${summary.errorCount || 0}\nWarnings: ${summary.warningCount || 0}\n\nReview logs and confirm to process with AI.`,
+        `✅ Debug session stopped\n\nTotal lines: ${summary.totalLines || 0}\nErrors: ${summary.errorCount || 0}\nWarnings: ${summary.warningCount || 0}\n\nReview logs and confirm to fix errors with AI.`,
       );
     } catch (error) {
       const errorMessage = getErrorMessage(error);
+      console.error(`[DEBUG] 🚨 ERROR in stopLiveCheck:`, errorMessage);
+      console.error(`[DEBUG] Error object:`, error);
       setStatus("error");
       onError(errorMessage);
-      alert(`❌ Failed to stop live capture\n\n${errorMessage}`);
+      alert(`❌ Failed to stop debug session\n\n${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleCheckDeployment = async () => {
+    console.log("[DEBUG] ========================================");
+    console.log("[DEBUG] 🔘 Button clicked - handleCheckDeployment()");
+    console.log("[DEBUG] 📍 Current status:", status);
+    console.log("[DEBUG] 📍 Current liveSessionId:", liveSessionId);
+    console.log("[DEBUG] ========================================");
+
     if (liveSessionId) {
+      console.log("[DEBUG] Session already running, stopping it...");
       await stopLiveCheck();
       return;
     }
 
+    console.log("[DEBUG] Starting new debug session...");
     await startLiveCheck();
     return;
 
@@ -525,16 +679,14 @@ START RequestId: 0dc73a73-1af4-4b7f-8a86-495d8978c735 Version: $LATEST
           {isLoading ? (
             <span className="flex items-center gap-2">
               <span className="animate-spin">⟳</span>
-              {liveSessionId ? "Stopping Capture..." : "Starting Capture..."}
+              {liveSessionId ? "Stopping Debug..." : "Starting Debug..."}
             </span>
           ) : liveSessionId ? (
-            <span className="flex items-center gap-2">
-              ⏹ Stop Check Deployment
-            </span>
+            <span className="flex items-center gap-2">⏹ Stop Debug</span>
           ) : status === "success" ? (
             <span className="flex items-center gap-2">
               <CheckCircleIcon className="h-5 w-5" />
-              Start Check Deployment
+              Start Debug
             </span>
           ) : status === "error" ? (
             <span className="flex items-center gap-2">
@@ -544,30 +696,42 @@ START RequestId: 0dc73a73-1af4-4b7f-8a86-495d8978c735 Version: $LATEST
           ) : status === "no-logs" ? (
             <span className="flex items-center gap-2">
               <span>ℹ️</span>
-              Start Check Deployment
+              Start Debug
             </span>
           ) : (
-            "Start Check Deployment"
+            "Start Debug"
           )}
         </button>
         {liveSessionId && (
-          <p className="text-sm text-red-600">
-            🔴 Live capture running for Lambda logs. Reproduce issue, then stop.
-          </p>
+          <div className="flex items-end gap-2">
+            <p className="text-sm text-red-600">
+              🔴 Debug session running ({liveSessionId.substring(0, 12)}...).
+              Reproduce issue, then stop.
+            </p>
+            <span className="animate-pulse text-lg">●●●</span>
+          </div>
         )}
         {status === "success" && !showConfirmation && (
           <p className="text-sm text-green-600">
-            ✓ Waiting for confirmation...
+            ✅ Logs received! Waiting for confirmation modal...
           </p>
         )}
         {status === "error" && (
-          <p className="text-sm text-red-600">✗ Failed to extract logs</p>
+          <div className="text-sm text-red-600">
+            <div>⛔ Failed to start debug</div>
+            <div className="text-xs text-gray-600">
+              👉 Check browser console (F12) for detailed error logs
+            </div>
+          </div>
         )}
         {status === "no-logs" && (
           <p className="text-sm text-blue-600">
             ℹ️ No logs found in last {timeWindow}
           </p>
         )}
+        <div className="text-xs text-gray-500">
+          💡 Open console (F12) to see detailed debug logs
+        </div>
       </div>
     </>
   );

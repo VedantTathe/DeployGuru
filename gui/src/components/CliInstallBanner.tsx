@@ -60,17 +60,32 @@ export function CliInstallBanner({
     const checkCliInstallation = async () => {
       try {
         const platform = getPlatform();
+        console.log("[DEBUG] [CliInstallBanner] Platform detected:", platform);
+
         // Use 'which' on mac/linux, 'where' on windows
         const command = platform === "windows" ? "where cn" : "which cn";
+        console.log("[DEBUG] [CliInstallBanner] Executing command:", command);
 
         const [stdout, stderr] = await ideMessenger.ide.subprocess(command);
+        console.log(
+          "[DEBUG] [CliInstallBanner] Command result - stdout length:",
+          stdout?.length,
+          "stderr:",
+          stderr,
+        );
 
         // If stdout has content (path to cn), it's installed
         // If empty or stderr has "not found", it's not installed
-        const isInstalled =
-          stdout.trim().length > 0 && !stderr.includes("not found");
+        const hasStdout = stdout && stdout.trim().length > 0;
+        const hasNotFoundError =
+          stderr && typeof stderr === "string" && stderr.includes("not found");
+
+        const isInstalled: boolean =
+          hasStdout && !hasNotFoundError ? true : false;
+        console.log("[DEBUG] [CliInstallBanner] CLI installed:", isInstalled);
         setCliInstalled(isInstalled);
       } catch (error) {
+        console.error("[DEBUG] [CliInstallBanner] Error checking CLI:", error);
         // If subprocess throws an error, assume CLI is not installed
         setCliInstalled(false);
       }

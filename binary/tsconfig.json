@@ -5,7 +5,10 @@
     "outDir": "out",
     "lib": ["ES2022", "dom", "es6", "es5", "dom.iterable", "scripthost"],
     "sourceMap": true,
-    "rootDirs": ["src", "../core"],
+    "baseUrl": ".",
+    "paths": {
+      "core/*": ["../core/*"]
+    },
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true /* enable all strict tsc:watching options */,

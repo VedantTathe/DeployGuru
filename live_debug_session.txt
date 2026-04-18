@@ -1,0 +1,25 @@
+[LIVE DEBUG SESSION LOGS]
+Resource: JalSaathi
+Session ID: session_1776508371908_9m2tcmkaw
+Started: 2026-04-18T10:32:51.908Z
+Ended: 2026-04-18T10:33:37.311Z
+Duration: 45s
+Poll Interval: 15s
+Poll Window: 2m
+Total Polls: 3
+Total Log Entries: 8
+
+════════════════════════════════════════════════════════════
+
+COLLECTED LOGS:
+
+2026-04-18T10:33:06.900Z [INFO] [auth] Cache hit
+2026-04-18T10:33:06.155Z [ERROR] [service-a] Connection timeout
+2026-04-18T10:33:06.871Z [DEBUG] [service-a] Reconnecting
+2026-04-18T10:33:21.823Z [ERROR] [service-b] Reconnecting
+2026-04-18T10:33:21.432Z [ERROR] [api-gateway] Data validated
+2026-04-18T10:33:21.909Z [WARN] [auth] Connection timeout
+2026-04-18T10:33:36.399Z [ERROR] [api-gateway] Query executed
+2026-04-18T10:33:36.460Z [DEBUG] [auth] Reconnecting
+
+════════════════════════════════════════════════════════════

@@ -13,6 +13,9 @@ const app = express();
 const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || "0.0.0.0";
 
+// Store for active debug sessions
+const activeSessions = new Map();
+
 // Middleware
 app.use(express.json());
 
@@ -20,7 +23,10 @@ app.use(express.json());
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Credentials", "true");
+  // Prevent authentication prompts
+  res.header("WWW-Authenticate", "none");
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
@@ -141,6 +147,220 @@ app.post("/api/deployment/run-command", async (req, res) => {
   }
 });
 
+// Single log file for live debug sessions
+const LIVE_DEBUG_LOG_FILE = path.join(
+  "/workspaces/DeployGuru",
+  "live_debug_session.txt",
+);
+
+// Function to generate sample log entries with timestamps
+function generateNewLogEntries() {
+  const logLevels = ["INFO", "DEBUG", "WARN", "ERROR"];
+  const services = [
+    "service-a",
+    "service-b",
+    "database",
+    "auth",
+    "api-gateway",
+  ];
+  const actions = [
+    "Request received",
+    "Processing data",
+    "Query executed",
+    "Cache hit",
+    "Authentication failed",
+    "Connection timeout",
+    "Reconnecting",
+    "Data validated",
+  ];
+
+  const now = new Date();
+  const entries = [];
+
+  // Generate 2-3 random log entries
+  const count = Math.floor(Math.random() * 2) + 2;
+  for (let i = 0; i < count; i++) {
+    const level = logLevels[Math.floor(Math.random() * logLevels.length)];
+    const service = services[Math.floor(Math.random() * services.length)];
+    const action = actions[Math.floor(Math.random() * actions.length)];
+    const timestamp = new Date(now.getTime() - Math.random() * 1000);
+
+    entries.push(
+      `${timestamp.toISOString()} [${level}] [${service}] ${action}`,
+    );
+  }
+
+  return entries.join("\n");
+}
+
+// Start a live debug session with continuous polling
+app.post("/api/deployment/live/start", (req, res) => {
+  try {
+    const { resourceName, pollIntervalSeconds, pollWindow } = req.body;
+
+    console.log(`\n📨 [API REQUEST] /api/deployment/live/start received`);
+    console.log(`   ├─ resourceName: ${resourceName}`);
+    console.log(`   ├─ pollIntervalSeconds: ${pollIntervalSeconds}`);
+    console.log(`   └─ pollWindow: ${pollWindow}`);
+
+    if (!resourceName) {
+      return res.status(400).json({ error: "resourceName is required" });
+    }
+
+    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const session = {
+      resourceName,
+      startTime: new Date(),
+      status: "running",
+      pollInterval: pollIntervalSeconds || 15,
+      pollWindow: pollWindow || "2m",
+      collectedLogs: [],
+      logCount: 0,
+      pollCount: 0,
+    };
+
+    activeSessions.set(sessionId, session);
+
+    console.log(
+      `\n🐛 [LIVE DEBUG] Started debug session ${sessionId} for ${resourceName}`,
+    );
+    console.log(`   ├─ Poll Interval: ${pollIntervalSeconds}s`);
+    console.log(`   └─ Poll Window: ${pollWindow}`);
+
+    // Start continuous polling loop
+    const pollInterval = (pollIntervalSeconds || 15) * 1000;
+
+    const pollingTimer = setInterval(() => {
+      if (!activeSessions.has(sessionId)) {
+        clearInterval(pollingTimer);
+        return;
+      }
+
+      const currentSession = activeSessions.get(sessionId);
+      const newLogs = generateNewLogEntries();
+      currentSession.collectedLogs.push(newLogs);
+      currentSession.logCount += newLogs.split("\n").length;
+      currentSession.pollCount += 1;
+
+      console.log(
+        `   📊 [POLL #${currentSession.pollCount}] Collected ${newLogs.split("\n").length} new log entries (Total: ${currentSession.logCount})`,
+      );
+    }, pollInterval);
+
+    // Store the interval timer so we can clear it on stop
+    session.pollingTimer = pollingTimer;
+
+    res.json({
+      success: true,
+      sessionId: sessionId,
+      message: `Debug session started for ${resourceName}. Polling every ${pollIntervalSeconds || 15}s for logs in the last ${pollWindow || "2m"}...`,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(`❌ Failed to start debug session: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      error: `Failed to start debug session: ${error.message}`,
+    });
+  }
+});
+
+// Stop a live debug session and return collected logs
+app.post("/api/deployment/live/stop", (req, res) => {
+  try {
+    const { sessionId } = req.body;
+
+    console.log(`\n📨 [API REQUEST] /api/deployment/live/stop received`);
+    console.log(`   └─ sessionId: ${sessionId}`);
+
+    if (!sessionId) {
+      console.error(`❌ sessionId is required`);
+      return res.status(400).json({ error: "sessionId is required" });
+    }
+
+    if (!activeSessions.has(sessionId)) {
+      console.error(`❌ Session ${sessionId} not found`);
+      return res.status(404).json({
+        success: false,
+        error: `Session ${sessionId} not found`,
+      });
+    }
+
+    const session = activeSessions.get(sessionId);
+
+    // Stop the polling timer
+    if (session.pollingTimer) {
+      clearInterval(session.pollingTimer);
+    }
+
+    activeSessions.delete(sessionId);
+
+    console.log(
+      `\n🛑 [LIVE DEBUG] Stopped debug session ${sessionId} for ${session.resourceName}`,
+    );
+    console.log(`   ├─ Total poll cycles: ${session.pollCount}`);
+    console.log(`   ├─ Total log entries: ${session.logCount}`);
+
+    // Compile final logs
+    const finalLogs = `[LIVE DEBUG SESSION LOGS]
+Resource: ${session.resourceName}
+Session ID: ${sessionId}
+Started: ${session.startTime.toISOString()}
+Ended: ${new Date().toISOString()}
+Duration: ${Math.round((Date.now() - session.startTime.getTime()) / 1000)}s
+Poll Interval: ${session.pollInterval}s
+Poll Window: ${session.pollWindow}
+Total Polls: ${session.pollCount}
+Total Log Entries: ${session.logCount}
+
+════════════════════════════════════════════════════════════
+
+COLLECTED LOGS:
+
+${session.collectedLogs.join("\n")}
+
+════════════════════════════════════════════════════════════`;
+
+    const summary = {
+      totalLines: finalLogs.split("\n").length,
+      errorCount: (finalLogs.match(/\[ERROR\]/g) || []).length,
+      warningCount: (finalLogs.match(/\[WARN\]/g) || []).length,
+      totalLogEntries: session.logCount,
+      pollCycles: session.pollCount,
+    };
+
+    console.log(`   └─ Summary: ${JSON.stringify(summary)}`);
+
+    // Save logs to file
+    try {
+      fs.writeFileSync(LIVE_DEBUG_LOG_FILE, finalLogs, "utf-8");
+      console.log(`\n✅ [FILE SAVED] Live debug logs saved to:`);
+      console.log(`   📄 ${LIVE_DEBUG_LOG_FILE}\n`);
+    } catch (fileError) {
+      console.error(
+        `❌ [FILE ERROR] Failed to save logs file: ${fileError.message}`,
+      );
+    }
+
+    res.json({
+      success: true,
+      sessionId: sessionId,
+      logs: finalLogs,
+      summary: summary,
+      logsFile: path.basename(LIVE_DEBUG_LOG_FILE),
+      logsFilePath: LIVE_DEBUG_LOG_FILE,
+      message: `Debug session stopped. Collected ${session.logCount} log entries over ${session.pollCount} poll cycles.`,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(`❌ Failed to stop debug session: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      error: `Failed to stop debug session: ${error.message}`,
+    });
+  }
+});
+
 const server = app.listen(PORT, HOST, () => {
   console.log(`
 ╔════════════════════════════════════════════════════════╗
@@ -159,7 +379,17 @@ const server = app.listen(PORT, HOST, () => {
      -H "Content-Type: application/json" \
      -d '{"resourceName":"JalSaathi","window":"10m"}'
 
-3️⃣  Browser Test:
+3️⃣  Live Debug Start:
+   curl -X POST http://localhost:${PORT}/api/deployment/live/start \
+     -H "Content-Type: application/json" \
+     -d '{"resourceName":"JalSaathi","pollIntervalSeconds":15,"pollWindow":"2m"}'
+
+4️⃣  Live Debug Stop:
+   curl -X POST http://localhost:${PORT}/api/deployment/live/stop \
+     -H "Content-Type: application/json" \
+     -d '{"sessionId":"<sessionId>"}'
+
+5️⃣  Browser Test:
    Open in browser: http://localhost:${PORT}/api/health
 
 Press CTRL+C to stop the server

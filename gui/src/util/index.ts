@@ -5,14 +5,44 @@ import { getLocalStorage } from "./localStorage";
 export type Platform = "mac" | "linux" | "windows" | "unknown";
 
 export function getPlatform(): Platform {
-  const platform = window.navigator.platform.toUpperCase();
-  if (platform.indexOf("MAC") >= 0) {
-    return "mac";
-  } else if (platform.indexOf("LINUX") >= 0) {
-    return "linux";
-  } else if (platform.indexOf("WIN") >= 0) {
-    return "windows";
-  } else {
+  try {
+    const userAgent = window.navigator.userAgent.toUpperCase();
+    const platform = window.navigator.platform.toUpperCase();
+
+    console.log("[DEBUG] [getPlatform] userAgent:", userAgent);
+    console.log("[DEBUG] [getPlatform] platform:", platform);
+
+    // Check user agent first (more reliable)
+    if (userAgent.indexOf("MAC") >= 0 || userAgent.indexOf("DARWIN") >= 0) {
+      console.log("[DEBUG] [getPlatform] Detected: MAC (from userAgent)");
+      return "mac";
+    } else if (userAgent.indexOf("LINUX") >= 0) {
+      console.log("[DEBUG] [getPlatform] Detected: LINUX (from userAgent)");
+      return "linux";
+    } else if (userAgent.indexOf("WIN") >= 0) {
+      console.log("[DEBUG] [getPlatform] Detected: WINDOWS (from userAgent)");
+      return "windows";
+    }
+
+    // Fallback to navigator.platform if user agent check fails
+    if (platform.indexOf("MAC") >= 0) {
+      console.log("[DEBUG] [getPlatform] Detected: MAC (from platform)");
+      return "mac";
+    } else if (platform.indexOf("LINUX") >= 0) {
+      console.log("[DEBUG] [getPlatform] Detected: LINUX (from platform)");
+      return "linux";
+    } else if (platform.indexOf("LINUX") >= 0 || platform.indexOf("X11") >= 0) {
+      console.log("[DEBUG] [getPlatform] Detected: LINUX (from platform X11)");
+      return "linux";
+    } else if (platform.indexOf("WIN") >= 0) {
+      console.log("[DEBUG] [getPlatform] Detected: WINDOWS (from platform)");
+      return "windows";
+    }
+
+    console.log("[DEBUG] [getPlatform] Detected: UNKNOWN");
+    return "unknown";
+  } catch (e) {
+    console.error("[DEBUG] [getPlatform] Error:", e);
     return "unknown";
   }
 }

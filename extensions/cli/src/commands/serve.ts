@@ -494,6 +494,179 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
       }
     },
   );
+
+  // Live debugging session management
+  interface LiveDebugSession {
+    sessionId: string;
+    resourceName: string;
+    logsFilePath: string;
+    startTime: number;
+    logs: string[];
+  }
+
+  const activeSessions = new Map<string, LiveDebugSession>();
+
+  // OPTIONS /api/deployment/live/start - Handle CORS preflight
+  app.options("/api/deployment/live/start", (req: Request, res: Response) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type");
+    res.sendStatus(200);
+  });
+
+  // POST /api/deployment/live/start - Start live debugging session
+  app.post(
+    "/api/deployment/live/start",
+    async (req: Request, res: Response) => {
+      res.header("Access-Control-Allow-Origin", "*");
+      res.header("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.header("Access-Control-Allow-Headers", "Content-Type");
+
+      state.lastActivity = Date.now();
+
+      try {
+        const { resourceName, pollIntervalSeconds, pollWindow } = req.body;
+
+        if (!resourceName) {
+          return res.status(400).json({
+            success: false,
+            error: "resourceName is required",
+          });
+        }
+
+        const sessionId = `debug-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+        const logsDir = path.join(process.cwd(), ".debug-sessions");
+
+        // Create debug sessions directory if it doesn't exist
+        if (!fs.existsSync(logsDir)) {
+          fs.mkdirSync(logsDir, { recursive: true });
+        }
+
+        const logsFilePath = path.join(logsDir, `${sessionId}.txt`);
+
+        // Initialize session
+        const session: LiveDebugSession = {
+          sessionId,
+          resourceName,
+          logsFilePath,
+          startTime: Date.now(),
+          logs: [],
+        };
+
+        activeSessions.set(sessionId, session);
+
+        // Create empty log file
+        fs.writeFileSync(
+          logsFilePath,
+          `[${new Date().toISOString()}] Debug session started for resource: ${resourceName}\n`,
+        );
+
+        logger.info(
+          `Started live debug session: ${sessionId} for resource: ${resourceName}`,
+        );
+
+        return res.json({
+          success: true,
+          sessionId,
+          message: `Live debug session started. Resource: ${resourceName}`,
+        });
+      } catch (error) {
+        const errorMsg = formatError(error);
+        logger.error(`Failed to start live debug session: ${errorMsg}`);
+        return res.status(500).json({
+          success: false,
+          error: `Failed to start debug session: ${errorMsg}`,
+        });
+      }
+    },
+  );
+
+  // OPTIONS /api/deployment/live/stop - Handle CORS preflight
+  app.options("/api/deployment/live/stop", (req: Request, res: Response) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type");
+    res.sendStatus(200);
+  });
+
+  // POST /api/deployment/live/stop - Stop live debugging session and return logs
+  app.post("/api/deployment/live/stop", async (req: Request, res: Response) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type");
+
+    state.lastActivity = Date.now();
+
+    try {
+      const { sessionId } = req.body;
+
+      if (!sessionId) {
+        return res.status(400).json({
+          success: false,
+          error: "sessionId is required",
+        });
+      }
+
+      const session = activeSessions.get(sessionId);
+      if (!session) {
+        return res.status(404).json({
+          success: false,
+          error: `Session not found: ${sessionId}`,
+        });
+      }
+
+      // Read the logs from file
+      let logs = "";
+      try {
+        if (fs.existsSync(session.logsFilePath)) {
+          logs = fs.readFileSync(session.logsFilePath, "utf-8");
+        }
+      } catch (fileError: any) {
+        logger.warn(`Failed to read logs file: ${fileError.message}`);
+      }
+
+      // Append session end marker
+      const endMarker = `\n[${new Date().toISOString()}] Debug session ended\n`;
+      fs.appendFileSync(session.logsFilePath, endMarker);
+
+      // Calculate summary
+      const lines = logs.split("\n").filter((line) => line.trim().length > 0);
+      const errorCount = lines.filter((line) =>
+        line.toLowerCase().includes("error"),
+      ).length;
+      const warningCount = lines.filter((line) =>
+        line.toLowerCase().includes("warn"),
+      ).length;
+
+      logger.info(
+        `Stopped live debug session: ${sessionId}. Logs: ${logs.length} bytes`,
+      );
+
+      // Clean up session (keep the file for history)
+      activeSessions.delete(sessionId);
+
+      return res.json({
+        success: true,
+        sessionId,
+        logs,
+        summary: {
+          totalLines: lines.length,
+          errorCount,
+          warningCount,
+          sessionDuration: Date.now() - session.startTime,
+          logsFile: session.logsFilePath,
+        },
+      });
+    } catch (error) {
+      const errorMsg = formatError(error);
+      logger.error(`Failed to stop live debug session: ${errorMsg}`);
+      return res.status(500).json({
+        success: false,
+        error: `Failed to stop debug session: ${errorMsg}`,
+      });
+    }
+  });
+
   app.post("/exit", async (_req: Request, res: Response) => {
     console.log(
       chalk.yellow("\nReceived exit request, shutting down server..."),
