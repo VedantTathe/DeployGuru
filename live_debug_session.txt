@@ -1,25 +1,22 @@
 [LIVE DEBUG SESSION LOGS]
 Resource: JalSaathi
-Session ID: session_1776508371908_9m2tcmkaw
-Started: 2026-04-18T10:32:51.908Z
-Ended: 2026-04-18T10:33:37.311Z
-Duration: 45s
+Session ID: session_1776516939668_i3fgu2qys
+Started: 2026-04-18T12:55:39.668Z
+Ended: 2026-04-18T12:56:13.183Z
+Duration: 34s
 Poll Interval: 15s
 Poll Window: 2m
-Total Polls: 3
-Total Log Entries: 8
+Total Polls: 2
+Total Log Entries: 5
 
 ════════════════════════════════════════════════════════════
 
 COLLECTED LOGS:
 
-2026-04-18T10:33:06.900Z [INFO] [auth] Cache hit
-2026-04-18T10:33:06.155Z [ERROR] [service-a] Connection timeout
-2026-04-18T10:33:06.871Z [DEBUG] [service-a] Reconnecting
-2026-04-18T10:33:21.823Z [ERROR] [service-b] Reconnecting
-2026-04-18T10:33:21.432Z [ERROR] [api-gateway] Data validated
-2026-04-18T10:33:21.909Z [WARN] [auth] Connection timeout
-2026-04-18T10:33:36.399Z [ERROR] [api-gateway] Query executed
-2026-04-18T10:33:36.460Z [DEBUG] [auth] Reconnecting
+2026-04-18T12:55:53.920Z [ERROR] [database] Connection timeout
+2026-04-18T12:55:53.867Z [INFO] [service-b] Data validated
+2026-04-18T12:55:54.373Z [WARN] [service-a] Query executed
+2026-04-18T12:56:09.665Z [WARN] [database] Cache hit
+2026-04-18T12:56:09.659Z [DEBUG] [database] Cache hit
 
 ════════════════════════════════════════════════════════════
