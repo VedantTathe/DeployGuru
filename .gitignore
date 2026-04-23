@@ -100,6 +100,32 @@ ENV/
 env.bak/
 venv.bak/
 
+# Credential and secret files
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.p7b
+*.jks
+*.kdbx
+*.secret
+*.secrets
+.aws/credentials
+.aws/config
+.netrc
+.npmrc
+id_rsa
+id_rsa.pub
+id_dsa
+id_dsa.pub
+id_ecdsa
+id_ecdsa.pub
+id_ed25519
+id_ed25519.pub
+
 # Spyder project settings
 .spyderproject
 .spyproject

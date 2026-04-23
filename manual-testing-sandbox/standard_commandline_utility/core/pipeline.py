@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import time
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from standard_commandline_utility.api.aws import AWSProvider
@@ -23,7 +23,7 @@ def run_pipeline(
     Returns exit code (0 success, >0 error).
     """
     duration_s = parse_duration(window)
-    end_time = int(time.time())
+    end_time = int(datetime.now(timezone.utc).timestamp())
     start_time = end_time - duration_s
 
     session_kwargs = {}

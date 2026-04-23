@@ -57,6 +57,34 @@ This utility uses `boto3.Session()` and therefore follows the standard boto3 cre
 3. IAM role attached to the EC2/Container/Instance where the tool runs (IMDS / ECS task role / instance profile).
 4. Default region: environment variables `AWS_REGION` / `AWS_DEFAULT_REGION`, or profile config; you can override with `--region`.
 
+Secure credential setup (recommended)
+
+Never paste real AWS keys into source files, chat logs, or scripts. Configure a named profile and keep credentials in your local AWS config.
+
+```bash
+aws configure --profile deployguru
+```
+
+Use this safe template when prompted:
+
+- AWS Access Key ID: `<YOUR_ACCESS_KEY_ID>`
+- AWS Secret Access Key: `<YOUR_SECRET_ACCESS_KEY>`
+- Default region name: `us-east-1`
+- Default output format: `json`
+
+You can also set region and output explicitly:
+
+```bash
+aws configure set region us-east-1 --profile deployguru
+aws configure set output json --profile deployguru
+```
+
+Then run this utility with the profile:
+
+```bash
+python -m standard_commandline_utility.deploy_api MyFunction --window 30m --profile deployguru
+```
+
 Output behavior
 
 - By default the utility prints ordered log events (oldest → newest) to stdout.

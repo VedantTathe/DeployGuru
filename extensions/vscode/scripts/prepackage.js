@@ -16,9 +16,45 @@ const { installAndCopyNodeModules } = require("./install-copy-nodemodule");
 const { npmInstall } = require("./npm-install");
 const { writeBuildTimestamp, continueDir } = require("./utils");
 
+const SQLITE_BINDING_RELATIVE_PATH = path.join(
+  "out",
+  "build",
+  "Release",
+  "node_sqlite3.node",
+);
+
+function isLockedSqliteError(error) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code = error.code;
+  const message = String(error.message || "");
+  const filePath = String(error.path || "");
+  const looksLikeSqlitePath =
+    filePath.includes("node_sqlite3.node") ||
+    message.includes("node_sqlite3.node");
+
+  return (code === "EPERM" || code === "EBUSY") && looksLikeSqlitePath;
+}
+
+function safeRimrafSync(targetPath) {
+  try {
+    rimrafSync(targetPath);
+  } catch (error) {
+    if (isLockedSqliteError(error)) {
+      console.warn(
+        `[warn] Skipping clean for locked sqlite binding at ${SQLITE_BINDING_RELATIVE_PATH}`,
+      );
+      return;
+    }
+    throw error;
+  }
+}
+
 // Clear folders that will be packaged to ensure clean slate
-rimrafSync(path.join(__dirname, "..", "bin"));
-rimrafSync(path.join(__dirname, "..", "out"));
+safeRimrafSync(path.join(__dirname, "..", "bin"));
+safeRimrafSync(path.join(__dirname, "..", "out"));
 fs.mkdirSync(path.join(__dirname, "..", "out", "node_modules"), {
   recursive: true,
 });
@@ -68,6 +104,83 @@ const isWinTarget = target?.startsWith("win");
 const isLinuxTarget = target?.startsWith("linux");
 const isMacTarget = target?.startsWith("darwin");
 
+function getGuiAssetStats(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  const stat = fs.statSync(filePath);
+  return {
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+  };
+}
+
+function getGuiArtifactState() {
+  const indexJsPath = path.join("dist", "assets", "index.js");
+  const indexCssPath = path.join("dist", "assets", "index.css");
+  const js = getGuiAssetStats(indexJsPath);
+  const css = getGuiAssetStats(indexCssPath);
+
+  return {
+    ready: Boolean(js && css && js.size > 0 && css.size > 0),
+    js,
+    css,
+  };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForStableGuiArtifacts({
+  timeoutMs = 120_000,
+  pollMs = 500,
+  stableMs = 1_500,
+} = {}) {
+  const start = Date.now();
+  let stableSince = 0;
+  let lastSignature = "";
+
+  while (Date.now() - start < timeoutMs) {
+    const { ready, js, css } = getGuiArtifactState();
+    if (ready && js && css) {
+      const signature = `${js.size}:${js.mtimeMs}:${css.size}:${css.mtimeMs}`;
+      if (signature !== lastSignature) {
+        lastSignature = signature;
+        stableSince = Date.now();
+      } else if (Date.now() - stableSince >= stableMs) {
+        return true;
+      }
+    } else {
+      lastSignature = "";
+      stableSince = 0;
+    }
+
+    await sleep(pollMs);
+  }
+
+  return false;
+}
+
+async function ensureGuiBuildArtifacts() {
+  if (await waitForStableGuiArtifacts({ timeoutMs: 30_000 })) {
+    return;
+  }
+
+  // If gui build is still running or previous outputs are stale/empty, run a local build
+  // and wait for outputs to settle before copying them into the extension packages.
+  console.log("[info] Missing/empty gui dist assets, running gui build...");
+  execCmdSync("npm run build");
+
+  if (!(await waitForStableGuiArtifacts({ timeoutMs: 60_000 }))) {
+    const { js, css } = getGuiArtifactState();
+    throw new Error(
+      `gui build did not produce non-empty stable assets: index.js(size=${js?.size ?? "missing"}), index.css(size=${css?.size ?? "missing"})`,
+    );
+  }
+}
+
 void (async () => {
   const startTime = Date.now();
   console.log(
@@ -87,6 +200,7 @@ void (async () => {
   }
 
   process.chdir(path.join(continueDir, "gui"));
+  await ensureGuiBuildArtifacts();
 
   // Copy over the dist folder to the JetBrains extension //
   const intellijExtensionWebviewPath = path.join(
@@ -349,6 +463,24 @@ void (async () => {
       { dereference: true },
       (error) => {
         if (error) {
+          if (isLockedSqliteError(error)) {
+            const existingPath = path.join(
+              __dirname,
+              "..",
+              "out",
+              "build",
+              "Release",
+              "node_sqlite3.node",
+            );
+            if (fs.existsSync(existingPath)) {
+              console.warn(
+                "[warn] sqlite3 binding is locked; using existing out/build/Release/node_sqlite3.node",
+              );
+              resolve();
+              return;
+            }
+          }
+
           console.warn("[error] Error copying sqlite3 files", error);
           reject(error);
         } else {
@@ -366,6 +498,24 @@ void (async () => {
       { dereference: true },
       (error) => {
         if (error) {
+          if (isLockedSqliteError(error)) {
+            const existingPath = path.join(
+              __dirname,
+              "..",
+              "out",
+              "build",
+              "Release",
+              "node_sqlite3.node",
+            );
+            if (fs.existsSync(existingPath)) {
+              console.warn(
+                "[warn] sqlite3 binding is locked for test copy; continuing with existing binary",
+              );
+              resolve();
+              return;
+            }
+          }
+
           console.warn("[error] Error copying sqlite3 files", error);
           reject(error);
         } else {

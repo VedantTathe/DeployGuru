@@ -1,0 +1,60 @@
+[LIVE DEBUG SESSION]
+Resource: JalSaathi
+Session ID: session_1776855401310_lx8hfdgcy
+Started: 2026-04-22T10:56:41.313Z
+Session Start Time (UTC epoch ms): 1776855400726
+
+
+[LIVE DEBUG SESSION LOGS]
+Resource: JalSaathi
+Session ID: session_1776855401310_lx8hfdgcy
+Started: 2026-04-22T10:56:41.313Z
+Ended: 2026-04-22T10:58:01.596Z
+Duration: 80s
+Session Start Time (UTC epoch ms): 1776855400726
+Last Poll At: 2026-04-22T10:56:54.253Z
+Log Group: /aws/lambda/JalSaathiStack-JalSaathiBackendFunctionFBB18D16-vcdHQNJR8fws
+Region: ap-south-1
+Total Streamed Lines: 36
+Poll Errors: 1
+
+════════════════════════════════════════════════════════════
+
+COLLECTED LOGS:
+
+2026-04-22T10:56:43.532000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 START RequestId: c90802b0-cedc-4c09-a20c-cca016577ab3 Version: $LATEST
+2026-04-22T10:56:43.532000+00:00 2026/04/22/[$LATEST]10a93f4f0ffe410cbce8729f6f85a1d0 START RequestId: 2c6cdfb6-139e-401e-8792-9c8d7bcdb580 Version: $LATEST
+2026-04-22T10:56:43.534000+00:00 2026/04/22/[$LATEST]10a93f4f0ffe410cbce8729f6f85a1d0 2026-04-22T10:56:43.534Z	f75118fb-5451-496f-8362-f45d9c85ef8b	WARN	[2026-04-22T10:56:43.534Z] [PID: 2] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Wed Apr 22 2026 10:56:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+2026-04-22T10:56:43.535000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 2026-04-22T10:56:43.535Z	1a52724b-5daa-4282-b273-af3220327d9d	WARN	[2026-04-22T10:56:43.535Z] [PID: 2] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Wed Apr 22 2026 10:56:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+2026-04-22T10:56:43.535000+00:00 2026/04/22/[$LATEST]7d19049b9b43468ea745a48ab52f7780 START RequestId: 5dd96776-830b-41ed-b431-dc1f4d5bb605 Version: $LATEST
+2026-04-22T10:56:43.536000+00:00 2026/04/22/[$LATEST]7d19049b9b43468ea745a48ab52f7780 2026-04-22T10:56:43.536Z	66c1025a-4357-4df9-bf7b-1c2cc36a7102	WARN	[2026-04-22T10:56:43.536Z] [PID: 2] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Wed Apr 22 2026 10:56:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+2026-04-22T10:56:43.552000+00:00 2026/04/22/[$LATEST]10a93f4f0ffe410cbce8729f6f85a1d0 2026-04-22T10:56:43.552Z	2c6cdfb6-139e-401e-8792-9c8d7bcdb580	INFO	[authenticateToken] Auth header: Present
+2026-04-22T10:56:43.552000+00:00 2026/04/22/[$LATEST]7d19049b9b43468ea745a48ab52f7780 2026-04-22T10:56:43.552Z	5dd96776-830b-41ed-b431-dc1f4d5bb605	INFO	[authenticateToken] Auth header: Present
+2026-04-22T10:56:43.552000+00:00 2026/04/22/[$LATEST]7d19049b9b43468ea745a48ab52f7780 2026-04-22T10:56:43.552Z	5dd96776-830b-41ed-b431-dc1f4d5bb605	INFO	[authenticateToken] Token: Extracted
+2026-04-22T10:56:43.553000+00:00 2026/04/22/[$LATEST]10a93f4f0ffe410cbce8729f6f85a1d0 2026-04-22T10:56:43.553Z	2c6cdfb6-139e-401e-8792-9c8d7bcdb580	INFO	[authenticateToken] Token: Extracted
+2026-04-22T10:56:43.553000+00:00 2026/04/22/[$LATEST]7d19049b9b43468ea745a48ab52f7780 2026-04-22T10:56:43.553Z	5dd96776-830b-41ed-b431-dc1f4d5bb605	INFO	[authenticateToken] Token decoded, userId: 69e512943ba57d5027532fbb
+2026-04-22T10:56:43.565000+00:00 2026/04/22/[$LATEST]10a93f4f0ffe410cbce8729f6f85a1d0 2026-04-22T10:56:43.565Z	2c6cdfb6-139e-401e-8792-9c8d7bcdb580	INFO	[authenticateToken] Token decoded, userId: 69e512943ba57d5027532fbb
+2026-04-22T10:56:43.566000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 2026-04-22T10:56:43.566Z	c90802b0-cedc-4c09-a20c-cca016577ab3	INFO	[authenticateToken] Auth header: Present
+2026-04-22T10:56:43.566000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 2026-04-22T10:56:43.566Z	c90802b0-cedc-4c09-a20c-cca016577ab3	INFO	[authenticateToken] Token: Extracted
+2026-04-22T10:56:43.567000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 2026-04-22T10:56:43.567Z	c90802b0-cedc-4c09-a20c-cca016577ab3	INFO	[authenticateToken] Token decoded, userId: 69e512943ba57d5027532fbb
+2026-04-22T10:56:43.568000+00:00 2026/04/22/[$LATEST]7d19049b9b43468ea745a48ab52f7780 2026-04-22T10:56:43.568Z	5dd96776-830b-41ed-b431-dc1f4d5bb605	INFO	[authenticateToken] User found: {
+  id: new ObjectId('69e512943ba57d5027532fbb'),
+  role: 'customer',
+  email: 'mahirbajole653@gmail.com'
+}
+2026-04-22T10:56:43.573000+00:00 2026/04/22/[$LATEST]10a93f4f0ffe410cbce8729f6f85a1d0 2026-04-22T10:56:43.573Z	2c6cdfb6-139e-401e-8792-9c8d7bcdb580	INFO	[authenticateToken] User found: {
+  id: new ObjectId('69e512943ba57d5027532fbb'),
+  role: 'customer',
+  email: 'mahirbajole653@gmail.com'
+}
+2026-04-22T10:56:43.576000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 2026-04-22T10:56:43.576Z	c90802b0-cedc-4c09-a20c-cca016577ab3	INFO	[authenticateToken] User found: {
+  id: new ObjectId('69e512943ba57d5027532fbb'),
+  role: 'customer',
+  email: 'mahirbajole653@gmail.com'
+}
+2026-04-22T10:56:43.576000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 2026-04-22T10:56:43.576Z	c90802b0-cedc-4c09-a20c-cca016577ab3	INFO	[authorizeRoles] Checking roles: [ 'customer' ]
+2026-04-22T10:56:43.576000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 2026-04-22T10:56:43.576Z	c90802b0-cedc-4c09-a20c-cca016577ab3	INFO	[authorizeRoles] req.user exists? true
+2026-04-22T10:56:43.576000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 2026-04-22T10:56:43.576Z	c90802b0-cedc-4c09-a20c-cca016577ab3	INFO	[authorizeRoles] User role: customer
+2026-04-22T10:56:43.576000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 2026-04-22T10:56:43.576Z	c90802b0-cedc-4c09-a20c-cca016577ab3	INFO	[authorizeRoles] Authorization successful
+2026-04-22T10:56:43.597000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 END RequestId: c90802b0-cedc-4c09-a20c-cca016577ab3
+2026-04-22T10:56:43.597000+00:00 2026/04/22/[$LATEST]07d8e18c0e7b48a092b641a0d3e4ef77 REPORT RequestId: c90802b0-cedc-4c09-a20c-cca016577ab3	Duration: 64.36 ms	Billed Duration: 65 ms	Memory Size: 512 MB	Max Memory Used: 143 MB

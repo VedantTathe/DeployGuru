@@ -1,7 +1,7 @@
 import chalk from "chalk";
+import { execSync } from "child_process";
 import type { ChatHistoryItem } from "core/index.js";
 import express, { Request, Response } from "express";
-import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 
@@ -389,14 +389,17 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
       state.lastActivity = Date.now();
 
       try {
-        const { resourceName, window: timeWindow } = req.body;
+        const { resourceName, window: timeWindow, startTime } = req.body;
 
         if (!resourceName) {
           return res.status(400).json({ error: "resourceName is required" });
         }
 
         // Build the command to execute
-        const deployCommand = `python -m standard_commandline_utility.deploy_api ${resourceName} --window ${timeWindow || "10m"} --stream-only --out extracted_logs.txt`;
+        const hasStartTime = Number.isFinite(Number(startTime));
+        const deployCommand = hasStartTime
+          ? `python -m standard_commandline_utility.deploy_api ${resourceName} --start-time ${Number(startTime)} --stream-only --out extracted_logs.txt`
+          : `python -m standard_commandline_utility.deploy_api ${resourceName} --window ${timeWindow || "10m"} --stream-only --out extracted_logs.txt`;
 
         logger.info(`Executing deployment command: ${deployCommand}`);
 
@@ -500,11 +503,46 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
     sessionId: string;
     resourceName: string;
     logsFilePath: string;
+    sessionStartTimeMs: number;
+    pollIntervalSeconds: number;
+    pollTimer: NodeJS.Timeout | null;
+    lastPollAt: number | null;
     startTime: number;
     logs: string[];
   }
 
   const activeSessions = new Map<string, LiveDebugSession>();
+
+  const pollLiveDebugSession = (session: LiveDebugSession) => {
+    try {
+      const deployCommand =
+        `python -m standard_commandline_utility.deploy_api ${session.resourceName} ` +
+        `--start-time ${session.sessionStartTimeMs} --stream-only --out \"${session.logsFilePath}\"`;
+
+      logger.info(
+        `Polling debug session ${session.sessionId}: ${deployCommand}`,
+      );
+
+      execSync(deployCommand, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+        cwd: process.cwd(),
+      });
+
+      session.lastPollAt = Date.now();
+    } catch (error: any) {
+      const stderr =
+        typeof error?.stderr === "string"
+          ? error.stderr
+          : error?.stderr?.toString?.() ||
+            error?.message ||
+            "Unknown poll error";
+
+      logger.warn(
+        `Live debug poll failed for ${session.sessionId}: ${stderr.substring(0, 1200)}`,
+      );
+    }
+  };
 
   // OPTIONS /api/deployment/live/start - Handle CORS preflight
   app.options("/api/deployment/live/start", (req: Request, res: Response) => {
@@ -525,7 +563,8 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
       state.lastActivity = Date.now();
 
       try {
-        const { resourceName, pollIntervalSeconds, pollWindow } = req.body;
+        const { resourceName, pollIntervalSeconds, sessionStartTime } =
+          req.body;
 
         if (!resourceName) {
           return res.status(400).json({
@@ -533,6 +572,15 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
             error: "resourceName is required",
           });
         }
+
+        const requestedPollInterval = Number(pollIntervalSeconds);
+        const pollEverySeconds = Number.isFinite(requestedPollInterval)
+          ? Math.max(5, Math.floor(requestedPollInterval))
+          : 15;
+        const requestedStartTime = Number(sessionStartTime);
+        const sessionStartTimeMs = Number.isFinite(requestedStartTime)
+          ? Math.floor(requestedStartTime)
+          : Date.now();
 
         const sessionId = `debug-${Date.now()}-${Math.random().toString(36).substring(7)}`;
         const logsDir = path.join(process.cwd(), ".debug-sessions");
@@ -549,6 +597,10 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
           sessionId,
           resourceName,
           logsFilePath,
+          sessionStartTimeMs,
+          pollIntervalSeconds: pollEverySeconds,
+          pollTimer: null,
+          lastPollAt: null,
           startTime: Date.now(),
           logs: [],
         };
@@ -558,16 +610,24 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
         // Create empty log file
         fs.writeFileSync(
           logsFilePath,
-          `[${new Date().toISOString()}] Debug session started for resource: ${resourceName}\n`,
+          `[${new Date().toISOString()}] Debug session started for resource: ${resourceName}\n` +
+            `[${new Date().toISOString()}] Session window start (UTC epoch ms): ${sessionStartTimeMs}\n`,
         );
 
+        // Poll immediately, then continue polling using a growing window: sessionStartTime -> now.
+        pollLiveDebugSession(session);
+        session.pollTimer = setInterval(() => {
+          pollLiveDebugSession(session);
+        }, pollEverySeconds * 1000);
+
         logger.info(
-          `Started live debug session: ${sessionId} for resource: ${resourceName}`,
+          `Started live debug session: ${sessionId} for resource: ${resourceName} (poll every ${pollEverySeconds}s, start=${sessionStartTimeMs})`,
         );
 
         return res.json({
           success: true,
           sessionId,
+          sessionStartTime: sessionStartTimeMs,
           message: `Live debug session started. Resource: ${resourceName}`,
         });
       } catch (error) {
@@ -615,6 +675,11 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
         });
       }
 
+      if (session.pollTimer) {
+        clearInterval(session.pollTimer);
+        session.pollTimer = null;
+      }
+
       // Read the logs from file
       let logs = "";
       try {
@@ -654,6 +719,8 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
           errorCount,
           warningCount,
           sessionDuration: Date.now() - session.startTime,
+          sessionStartTime: session.sessionStartTimeMs,
+          lastPollAt: session.lastPollAt,
           logsFile: session.logsFilePath,
         },
       });
@@ -681,6 +748,14 @@ export async function serve(prompt?: string, options: ServeOptions = {}) {
     // Set server running flag to false to stop processing
     state.serverRunning = false;
     stopStorageSync();
+
+    for (const session of activeSessions.values()) {
+      if (session.pollTimer) {
+        clearInterval(session.pollTimer);
+        session.pollTimer = null;
+      }
+    }
+    activeSessions.clear();
 
     // Abort any current processing
     if (state.currentAbortController) {

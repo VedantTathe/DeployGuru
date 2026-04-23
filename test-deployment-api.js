@@ -1,7 +1,7 @@
 /**
  * Simple Node.js Express server to test the deployment check API
  * Run: node test-deployment-api.js
- * Then test: curl -X POST http://localhost:8080/api/deployment/run-command -H "Content-Type: application/json" -d '{"resourceName":"JalSaathi","window":"10m"}'
+ * Then test: curl -X POST http://localhost:8081/api/deployment/run-command -H "Content-Type: application/json" -d '{"resourceName":"JalSaathi","window":"10m"}'
  */
 
 const express = require("express");
@@ -10,7 +10,7 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
-const PORT = Number(process.env.PORT || 8080);
+const PORT = Number(process.env.PORT || 8081);
 const HOST = process.env.HOST || "0.0.0.0";
 
 // Store for active debug sessions
@@ -154,56 +154,44 @@ app.post("/api/deployment/run-command", async (req, res) => {
   }
 });
 
-// Single log file for live debug sessions
-const LIVE_DEBUG_LOG_FILE = path.join(
-  "/workspaces/DeployGuru",
-  "live_debug_session.txt",
-);
+const DEBUG_SESSIONS_DIR = path.join(process.cwd(), ".debug-sessions");
 
-// Function to generate sample log entries with timestamps
-function generateNewLogEntries() {
-  const logLevels = ["INFO", "DEBUG", "WARN", "ERROR"];
-  const services = [
-    "service-a",
-    "service-b",
-    "database",
-    "auth",
-    "api-gateway",
-  ];
-  const actions = [
-    "Request received",
-    "Processing data",
-    "Query executed",
-    "Cache hit",
-    "Authentication failed",
-    "Connection timeout",
-    "Reconnecting",
-    "Data validated",
-  ];
+function ensureDebugSessionsDir() {
+  if (!fs.existsSync(DEBUG_SESSIONS_DIR)) {
+    fs.mkdirSync(DEBUG_SESSIONS_DIR, { recursive: true });
+  }
+}
 
-  const now = new Date();
-  const entries = [];
+function pollLiveDebugSession(session) {
+  try {
+    const deployCommand =
+      `python -m standard_commandline_utility.deploy_api ${session.resourceName} ` +
+      `--start-time ${session.sessionStartTimeMs} --stream-only --out "${session.logsFilePath}"`;
 
-  // Generate 2-3 random log entries
-  const count = Math.floor(Math.random() * 2) + 2;
-  for (let i = 0; i < count; i++) {
-    const level = logLevels[Math.floor(Math.random() * logLevels.length)];
-    const service = services[Math.floor(Math.random() * services.length)];
-    const action = actions[Math.floor(Math.random() * actions.length)];
-    const timestamp = new Date(now.getTime() - Math.random() * 1000);
+    execSync(deployCommand, {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      cwd: process.cwd(),
+    });
 
-    entries.push(
-      `${timestamp.toISOString()} [${level}] [${service}] ${action}`,
+    session.lastPollAt = Date.now();
+    session.pollCount += 1;
+    console.log(
+      `   📊 [POLL #${session.pollCount}] Synced CloudWatch logs to ${path.basename(session.logsFilePath)}`,
+    );
+  } catch (error) {
+    const stderr = error?.stderr ? error.stderr.toString() : error.message;
+    console.warn(
+      `   ⚠️  [POLL ERROR #${session.pollCount + 1}] Failed to fetch CloudWatch logs: ${stderr.substring(0, 500)}`,
     );
   }
-
-  return entries.join("\n");
 }
 
 // Start a live debug session with continuous polling
 app.post("/api/deployment/live/start", (req, res) => {
   try {
-    const { resourceName, pollIntervalSeconds, pollWindow } = req.body;
+    const { resourceName, pollIntervalSeconds, pollWindow, sessionStartTime } =
+      req.body;
 
     console.log(`\n📨 [API REQUEST] /api/deployment/live/start received`);
     console.log(`   ├─ resourceName: ${resourceName}`);
@@ -214,16 +202,25 @@ app.post("/api/deployment/live/start", (req, res) => {
       return res.status(400).json({ error: "resourceName is required" });
     }
 
+    const requestedStartTime = Number(sessionStartTime);
+    const sessionStartTimeMs = Number.isFinite(requestedStartTime)
+      ? Math.floor(requestedStartTime)
+      : Date.now();
+
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    ensureDebugSessionsDir();
+    const logsFilePath = path.join(DEBUG_SESSIONS_DIR, `${sessionId}.txt`);
+
     const session = {
       resourceName,
       startTime: new Date(),
       status: "running",
       pollInterval: pollIntervalSeconds || 15,
       pollWindow: pollWindow || "2m",
-      collectedLogs: [],
-      logCount: 0,
+      sessionStartTimeMs,
+      logsFilePath,
       pollCount: 0,
+      lastPollAt: null,
     };
 
     activeSessions.set(sessionId, session);
@@ -234,8 +231,17 @@ app.post("/api/deployment/live/start", (req, res) => {
     console.log(`   ├─ Poll Interval: ${pollIntervalSeconds}s`);
     console.log(`   └─ Poll Window: ${pollWindow}`);
 
-    // Start continuous polling loop
+    // Prime file and start continuous CloudWatch polling loop
+    fs.writeFileSync(
+      logsFilePath,
+      `[${new Date().toISOString()}] Live debug session started for ${resourceName}\n` +
+        `[${new Date().toISOString()}] Session window start (UTC epoch ms): ${sessionStartTimeMs}\n`,
+      "utf-8",
+    );
+
     const pollInterval = (pollIntervalSeconds || 15) * 1000;
+
+    pollLiveDebugSession(session);
 
     const pollingTimer = setInterval(() => {
       if (!activeSessions.has(sessionId)) {
@@ -244,14 +250,7 @@ app.post("/api/deployment/live/start", (req, res) => {
       }
 
       const currentSession = activeSessions.get(sessionId);
-      const newLogs = generateNewLogEntries();
-      currentSession.collectedLogs.push(newLogs);
-      currentSession.logCount += newLogs.split("\n").length;
-      currentSession.pollCount += 1;
-
-      console.log(
-        `   📊 [POLL #${currentSession.pollCount}] Collected ${newLogs.split("\n").length} new log entries (Total: ${currentSession.logCount})`,
-      );
+      pollLiveDebugSession(currentSession);
     }, pollInterval);
 
     // Store the interval timer so we can clear it on stop
@@ -260,6 +259,7 @@ app.post("/api/deployment/live/start", (req, res) => {
     res.json({
       success: true,
       sessionId: sessionId,
+      sessionStartTime: sessionStartTimeMs,
       message: `Debug session started for ${resourceName}. Polling every ${pollIntervalSeconds || 15}s for logs in the last ${pollWindow || "2m"}...`,
       timestamp: new Date().toISOString(),
     });
@@ -306,57 +306,41 @@ app.post("/api/deployment/live/stop", (req, res) => {
       `\n🛑 [LIVE DEBUG] Stopped debug session ${sessionId} for ${session.resourceName}`,
     );
     console.log(`   ├─ Total poll cycles: ${session.pollCount}`);
-    console.log(`   ├─ Total log entries: ${session.logCount}`);
+    // Read final logs from CloudWatch output file
+    let finalLogs = "";
+    if (fs.existsSync(session.logsFilePath)) {
+      finalLogs = fs.readFileSync(session.logsFilePath, "utf-8");
+    }
 
-    // Compile final logs
-    const finalLogs = `[LIVE DEBUG SESSION LOGS]
-Resource: ${session.resourceName}
-Session ID: ${sessionId}
-Started: ${session.startTime.toISOString()}
-Ended: ${new Date().toISOString()}
-Duration: ${Math.round((Date.now() - session.startTime.getTime()) / 1000)}s
-Poll Interval: ${session.pollInterval}s
-Poll Window: ${session.pollWindow}
-Total Polls: ${session.pollCount}
-Total Log Entries: ${session.logCount}
-
-════════════════════════════════════════════════════════════
-
-COLLECTED LOGS:
-
-${session.collectedLogs.join("\n")}
-
-════════════════════════════════════════════════════════════`;
+    const nonEmptyLines = finalLogs
+      .split("\n")
+      .filter((line) => line.trim().length > 0);
 
     const summary = {
-      totalLines: finalLogs.split("\n").length,
+      totalLines: nonEmptyLines.length,
       errorCount: (finalLogs.match(/\[ERROR\]/g) || []).length,
       warningCount: (finalLogs.match(/\[WARN\]/g) || []).length,
-      totalLogEntries: session.logCount,
+      totalLogEntries: nonEmptyLines.length,
       pollCycles: session.pollCount,
+      sessionDurationSeconds: Math.round(
+        (Date.now() - session.startTime.getTime()) / 1000,
+      ),
+      logsFilePath: session.logsFilePath,
     };
 
     console.log(`   └─ Summary: ${JSON.stringify(summary)}`);
 
-    // Save logs to file
-    try {
-      fs.writeFileSync(LIVE_DEBUG_LOG_FILE, finalLogs, "utf-8");
-      console.log(`\n✅ [FILE SAVED] Live debug logs saved to:`);
-      console.log(`   📄 ${LIVE_DEBUG_LOG_FILE}\n`);
-    } catch (fileError) {
-      console.error(
-        `❌ [FILE ERROR] Failed to save logs file: ${fileError.message}`,
-      );
-    }
+    console.log(`\n✅ [FILE SAVED] Live debug logs saved to:`);
+    console.log(`   📄 ${session.logsFilePath}\n`);
 
     res.json({
       success: true,
       sessionId: sessionId,
       logs: finalLogs,
       summary: summary,
-      logsFile: path.basename(LIVE_DEBUG_LOG_FILE),
-      logsFilePath: LIVE_DEBUG_LOG_FILE,
-      message: `Debug session stopped. Collected ${session.logCount} log entries over ${session.pollCount} poll cycles.`,
+      logsFile: path.basename(session.logsFilePath),
+      logsFilePath: session.logsFilePath,
+      message: `Debug session stopped. Synced logs over ${session.pollCount} poll cycles.`,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

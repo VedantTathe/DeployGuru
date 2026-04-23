@@ -2,7 +2,7 @@ import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 // Detect if we're in Codespaces environment
 let IS_CODESPACES = false;
@@ -48,7 +48,7 @@ try {
     IS_CODESPACES = true;
     const codespaceName = getCodespaceNameFromHost(host);
     if (codespaceName && codespaceName !== "assets") {
-      CODESPACES_API_BASE_URL = `https://${codespaceName}-8080.app.github.dev`;
+      CODESPACES_API_BASE_URL = `https://${codespaceName}-8081.app.github.dev`;
       console.log(
         "[DEBUG] 🔗 Detected Codespaces environment:",
         CODESPACES_API_BASE_URL,
@@ -60,7 +60,7 @@ try {
   console.log("[DEBUG] ⚠️ Could not detect Codespaces:", e);
 }
 
-const LOCALHOST_API_BASE_URL = "http://localhost:8080";
+const LOCALHOST_API_BASE_URL = "http://localhost:8081";
 
 // In Codespaces, TRY localhost first (works via service worker tunnel)
 // Then fall back to port-forwarded URL if that fails
@@ -71,6 +71,124 @@ let DEFAULT_DEPLOYMENT_API_BASE_URL =
 const FALLBACK_DEPLOYMENT_API_BASE_URL =
   IS_CODESPACES && CODESPACES_API_BASE_URL ? CODESPACES_API_BASE_URL : "";
 const DEPLOYMENT_API_BASE_URL = DEFAULT_DEPLOYMENT_API_BASE_URL;
+
+type ParsedLogLevel = "error" | "warning" | "info" | "debug" | "trace" | null;
+
+const normalizeLevel = (level: string): ParsedLogLevel => {
+  const value = level.trim().toUpperCase();
+  if (["ERROR", "ERR", "FATAL"].includes(value)) return "error";
+  if (["WARN", "WARNING"].includes(value)) return "warning";
+  if (value === "INFO") return "info";
+  if (value === "DEBUG") return "debug";
+  if (value === "TRACE") return "trace";
+  return null;
+};
+
+const parseLogLevel = (line: string): ParsedLogLevel => {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  // CloudWatch/Lambda style: <ts>\t<requestId>\tERROR\t...
+  const tabDelimitedLevel = trimmed.match(
+    /	(INFO|WARN|WARNING|ERROR|ERR|FATAL|DEBUG|TRACE)\t/i,
+  );
+  if (tabDelimitedLevel?.[1]) {
+    return normalizeLevel(tabDelimitedLevel[1]);
+  }
+
+  // CloudWatch flattened text can become space-delimited columns:
+  // <ingestionTs>  <stream>  <eventTs>  <requestId>  ERROR  <message>
+  const spacedColumnLevel = trimmed.match(
+    /\s{2,}(INFO|WARN|WARNING|ERROR|ERR|FATAL|DEBUG|TRACE)\s{2,}/i,
+  );
+  if (spacedColumnLevel?.[1]) {
+    return normalizeLevel(spacedColumnLevel[1]);
+  }
+
+  // Bracketed level tokens: [ERROR], [WARN], [INFO], etc.
+  const bracketedLevel = trimmed.match(
+    /\[(INFO|WARN|WARNING|ERROR|ERR|FATAL|DEBUG|TRACE)\]/i,
+  );
+  if (bracketedLevel?.[1]) {
+    return normalizeLevel(bracketedLevel[1]);
+  }
+
+  // Prefix level tokens: ERROR ..., WARN ..., INFO ...
+  const prefixLevel = trimmed.match(
+    /^(INFO|WARN|WARNING|ERROR|ERR|FATAL|DEBUG|TRACE)\b/i,
+  );
+  if (prefixLevel?.[1]) {
+    return normalizeLevel(prefixLevel[1]);
+  }
+
+  // JSON key style: "level":"error" or "severity":"warning"
+  const jsonLevel = trimmed.match(
+    /"(?:level|severity)"\s*:\s*"(info|warn|warning|error|err|fatal|debug|trace)"/i,
+  );
+  if (jsonLevel?.[1]) {
+    return normalizeLevel(jsonLevel[1]);
+  }
+
+  return null;
+};
+
+const extractLogLines = (logs: string): string[] => {
+  const trimmed = logs.trim();
+  if (!trimmed) return [];
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      Array.isArray((parsed as any).events)
+    ) {
+      return (parsed as any).events
+        .map((event: any) =>
+          typeof event?.message === "string" ? event.message : "",
+        )
+        .filter((line: string) => line.trim().length > 0);
+    }
+  } catch {
+    // Not JSON; treat as plain text logs.
+  }
+
+  return logs.split("\n").filter((line) => line.trim().length > 0);
+};
+
+const getLogSeverityCounts = (
+  logs: string,
+): { errorCount: number; warningCount: number } => {
+  const lines = extractLogLines(logs);
+  let errorCount = 0;
+  let warningCount = 0;
+
+  for (const line of lines) {
+    const level = parseLogLevel(line);
+    if (level === "error") {
+      errorCount += 1;
+      continue;
+    }
+    if (level === "warning") {
+      warningCount += 1;
+    }
+  }
+
+  return { errorCount, warningCount };
+};
+
+const isMockLiveDebugPayload = (logs: string): boolean => {
+  return (
+    logs.includes("[LIVE DEBUG SESSION LOGS]") &&
+    logs.includes("COLLECTED LOGS:")
+  );
+};
+
+const hasConcreteErrorDetail = (line: string): boolean => {
+  return /(Exception|Error:|Unhandled|Traceback|stack\s*trace|failed|timeout|refused|denied|invalid|not\s+found)/i.test(
+    line,
+  );
+};
 
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -107,16 +225,70 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  // Parse logs to show errors separately
-  const errorLines = logs
-    .split("\n")
-    .filter((line) => line.includes("ERROR") || line.includes("WARN"));
-  const errorCount = (logs.match(/\[ERROR\]/g) || []).length;
-  const warningCount = (logs.match(/\[WARN\]/g) || []).length;
+  const MAX_VISIBLE_LOG_LINES = 100;
+  const LOG_PAGE_SIZE = 100;
+  const MAX_VISIBLE_ERROR_LINES = 50;
+
+  const allLines = useMemo(
+    () => logs.split("\n").filter((line) => line.trim().length > 0),
+    [logs],
+  );
+
+  const [visibleLineCount, setVisibleLineCount] = useState(
+    MAX_VISIBLE_LOG_LINES,
+  );
+
+  useEffect(() => {
+    setVisibleLineCount(MAX_VISIBLE_LOG_LINES);
+  }, [logs, isOpen]);
+
+  const visibleLines = useMemo(() => {
+    if (allLines.length <= visibleLineCount) {
+      return allLines;
+    }
+    return allLines.slice(-visibleLineCount);
+  }, [allLines, visibleLineCount]);
+
+  const renderedLogs = useMemo(() => visibleLines.join("\n"), [visibleLines]);
+
+  // Parse logs to show errors and warnings separately while limiting rendered lines.
+  const errorLines = useMemo(() => {
+    return allLines
+      .filter((line) => parseLogLevel(line) === "error")
+      .slice(-MAX_VISIBLE_ERROR_LINES);
+  }, [allLines]);
+
+  const warningLines = useMemo(() => {
+    return allLines
+      .filter((line) => parseLogLevel(line) === "warning")
+      .slice(-MAX_VISIBLE_ERROR_LINES);
+  }, [allLines]);
+
+  const hasDetailedErrorContext = useMemo(() => {
+    return errorLines.some((line) => hasConcreteErrorDetail(line));
+  }, [errorLines]);
+
+  const { errorCount, warningCount } = useMemo(
+    () => getLogSeverityCounts(logs),
+    [logs],
+  );
+
+  const isMockLiveDebugLog = useMemo(
+    () => isMockLiveDebugPayload(logs),
+    [logs],
+  );
+
+  const logContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [renderedLogs]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="mx-4 flex max-h-screen w-full max-w-3xl flex-col rounded-lg bg-white p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black bg-opacity-50 py-4">
+      <div className="mx-4 flex max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white p-6">
         <h2 className="mb-2 text-2xl font-bold">🐛 Debug Logs Analysis</h2>
 
         {/* Summary Bar */}
@@ -140,10 +312,33 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
               Total Lines:
             </span>
             <span className="rounded bg-blue-500 px-2 py-1 font-bold text-white">
-              {logs.split("\n").length}
+              {allLines.length}
             </span>
           </div>
         </div>
+
+        {allLines.length > visibleLineCount && (
+          <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+            Showing latest {visibleLineCount} of {allLines.length} lines.
+            <button
+              type="button"
+              onClick={() =>
+                setVisibleLineCount((prev) => prev + LOG_PAGE_SIZE)
+              }
+              className="ml-2 rounded bg-blue-600 px-2 py-1 font-medium text-white hover:bg-blue-700"
+            >
+              Load 100 more
+            </button>
+          </div>
+        )}
+
+        {isMockLiveDebugLog && (
+          <div className="mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Detected mock live-debug payload format. These logs are likely
+            generated by the local test API, not directly fetched CloudWatch
+            entries.
+          </div>
+        )}
 
         {/* Errors Highlight */}
         {errorCount > 0 && (
@@ -158,13 +353,45 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                 </div>
               ))}
             </div>
+            {!hasDetailedErrorContext && (
+              <div className="mt-3 rounded border border-red-300 bg-red-100 px-2 py-1 text-xs text-red-800">
+                These error entries do not include a concrete exception message
+                or stack trace. The backend is likely logging generic event text
+                at ERROR level.
+              </div>
+            )}
+          </div>
+        )}
+
+        {warningCount > 0 && (
+          <div className="mb-4 rounded-lg border border-yellow-400 bg-yellow-50 p-3">
+            <h3 className="mb-2 font-bold text-yellow-800">
+              ⚠️ Warnings Found:
+            </h3>
+            <div className="max-h-24 space-y-1 overflow-y-auto">
+              {warningLines.map((line, idx) => (
+                <div key={idx} className="font-mono text-xs text-yellow-800">
+                  {line}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {errorCount === 0 && (
+          <div className="mb-4 rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-800">
+            ✅ No errors found in these logs. No AI fix is needed.
           </div>
         )}
 
         {/* Full Logs */}
-        <div className="mb-4 flex-1 rounded border-2 border-gray-300 bg-gray-900 p-4">
+        <div
+          ref={logContainerRef}
+          className="scroll-container mb-4 h-[45vh] min-h-0 overflow-y-scroll rounded border-2 border-gray-300 bg-gray-900 p-4"
+          style={{ scrollbarGutter: "stable" }}
+        >
           <pre className="whitespace-pre-wrap break-words font-mono text-xs text-green-400">
-            {logs}
+            {renderedLogs}
           </pre>
         </div>
 
@@ -179,11 +406,15 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
           </button>
           <button
             onClick={onConfirm}
-            disabled={isLoading}
+            disabled={isLoading || errorCount === 0}
             className="flex items-center gap-2 rounded bg-green-600 px-4 py-2 font-medium text-white hover:bg-green-700 disabled:opacity-50"
           >
             <span>✨</span>
-            {isLoading ? "Sending to AI..." : "Fix with AI"}
+            {isLoading
+              ? "Sending to AI..."
+              : errorCount === 0
+                ? "No Errors to Fix"
+                : "Fix with AI"}
           </button>
         </div>
       </div>
@@ -196,14 +427,83 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
   onLogsExtracted,
   onError,
 }) => {
+  const MAX_LIVE_LOG_LINES = 5000;
+  const LIVE_LOG_RENDER_LIMIT = 100;
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState<
     "idle" | "loading" | "success" | "error" | "no-logs"
   >("idle");
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [extractedLogs, setExtractedLogs] = useState("");
+  const [liveLogLines, setLiveLogLines] = useState<string[]>([]);
   const [timeWindow, setTimeWindow] = useState("1000h");
   const [liveSessionId, setLiveSessionId] = useState<string | null>(null);
+  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
+  const liveLogContainerRef = useRef<HTMLDivElement | null>(null);
+  const liveEventSourceRef = useRef<EventSource | null>(null);
+
+  const closeLiveStream = () => {
+    if (liveEventSourceRef.current) {
+      liveEventSourceRef.current.close();
+      liveEventSourceRef.current = null;
+    }
+  };
+
+  const openLiveStream = (sessionId: string, activeApiBaseUrl: string) => {
+    closeLiveStream();
+
+    const streamUrl = `${activeApiBaseUrl}/api/deployment/live/stream?sessionId=${encodeURIComponent(sessionId)}`;
+    const eventSource = new EventSource(streamUrl);
+    liveEventSourceRef.current = eventSource;
+
+    eventSource.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type !== "log" || !payload.line) {
+          return;
+        }
+
+        setLiveLogLines((prev) => {
+          const next = [...prev, payload.line];
+          if (next.length > MAX_LIVE_LOG_LINES) {
+            return next.slice(next.length - MAX_LIVE_LOG_LINES);
+          }
+          return next;
+        });
+      } catch (error) {
+        console.warn("[DEBUG] Failed to parse live stream event", error);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.warn("[DEBUG] Live stream connection warning", error);
+    };
+  };
+
+  const visibleLiveLines = useMemo(() => {
+    if (liveLogLines.length <= LIVE_LOG_RENDER_LIMIT) {
+      return liveLogLines;
+    }
+    return liveLogLines.slice(-LIVE_LOG_RENDER_LIMIT);
+  }, [liveLogLines]);
+
+  useEffect(() => {
+    if (
+      !liveSessionId ||
+      !isAutoScrollEnabled ||
+      !liveLogContainerRef.current
+    ) {
+      return;
+    }
+    liveLogContainerRef.current.scrollTop =
+      liveLogContainerRef.current.scrollHeight;
+  }, [liveSessionId, visibleLiveLines, isAutoScrollEnabled]);
+
+  useEffect(() => {
+    return () => {
+      closeLiveStream();
+    };
+  }, []);
 
   const callDeploymentApi = async (
     endpoint: string,
@@ -286,7 +586,7 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
       const requestBody = {
         resourceName: resourceName || "JalSaathiStack",
         pollIntervalSeconds: 15,
-        pollWindow: "2m",
+        sessionStartTime: Date.now(),
       };
 
       console.log(`[DEBUG] 📡 About to call /api/deployment/live/start`);
@@ -311,7 +611,10 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
       }
 
       console.log(`[DEBUG] ✅ Session started with ID: ${data.sessionId}`);
+      setLiveLogLines([]);
+      setIsAutoScrollEnabled(true);
       setLiveSessionId(data.sessionId);
+      openLiveStream(data.sessionId, activeApiBaseUrl);
       setStatus("success");
       alert(
         "🐛 Debug session started! Reproduce the issue now, then click 'Stop Debug' to analyze the logs.",
@@ -366,8 +669,14 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
       }
 
       console.log(`[DEBUG] ✅ Session stopped and logs received`);
+      closeLiveStream();
       setLiveSessionId(null);
-      setExtractedLogs(data.logs || "");
+      const finalLogs =
+        typeof data.logs === "string" && data.logs.trim().length > 0
+          ? data.logs
+          : liveLogLines.join("\n");
+      const severity = getLogSeverityCounts(finalLogs);
+      setExtractedLogs(finalLogs);
       setShowConfirmation(true);
       setStatus("success");
 
@@ -376,7 +685,7 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
         `[DEBUG] 📊 Summary - Lines: ${summary.totalLines || 0}, Errors: ${summary.errorCount || 0}, Warnings: ${summary.warningCount || 0}`,
       );
       alert(
-        `✅ Debug session stopped\n\nTotal lines: ${summary.totalLines || 0}\nErrors: ${summary.errorCount || 0}\nWarnings: ${summary.warningCount || 0}\n\nReview logs and confirm to fix errors with AI.`,
+        `✅ Debug session stopped\n\nTotal lines: ${summary.totalLines || 0}\nErrors: ${severity.errorCount}\nWarnings: ${severity.warningCount}\n\n${severity.errorCount > 0 ? "Review logs and confirm to fix errors with AI." : "No errors found. No need to fix with AI."}`,
       );
     } catch (error) {
       const errorMessage = getErrorMessage(error);
@@ -386,6 +695,7 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
       onError(errorMessage);
       alert(`❌ Failed to stop debug session\n\n${errorMessage}`);
     } finally {
+      closeLiveStream();
       setIsLoading(false);
     }
   };
@@ -576,98 +886,27 @@ export const DeploymentCheckButton: React.FC<DeploymentCheckProps> = ({
 
   const handleConfirmLogs = () => {
     try {
-      const prompt = `Please analyze these deployment logs for ${resourceName}:\n\n${extractedLogs}\n\n026-04-16T07:59:40.940Z
-START RequestId: 466f7547-aae5-4e59-97db-a564f73c3963 Version: $LATEST
-2026-04-16T07:59:40.943Z
-2026-04-16T07:59:40.943Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO [authenticateToken] Auth header: Present
-2026-04-16T07:59:40.943Z
-2026-04-16T07:59:40.943Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO [authenticateToken] Token: Extracted
-2026-04-16T07:59:40.943Z
-2026-04-16T07:59:40.943Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO [authenticateToken] Token decoded, userId: 6999efaa4cbbb56b08424def
-2026-04-16T07:59:40.954Z
-2026-04-16T07:59:40.954Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO [authenticateToken] User found: { id: new ObjectId('6999efaa4cbbb56b08424def'), role: 'customer', email: 'tathevedant70@gmail.com' }
-2026-04-16T07:59:40.979Z
-2026-04-16T07:59:40.979Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 📍 Default Address Query Result: { _id: new ObjectId('6999efeb4cbbb56b08424e0a'), label: 'home', coordinates: { latitude: 16.846084162549758, longitude: 74.59834140555783 }, hasLat: true, hasLng: true }
-2026-04-16T07:59:40.979Z
-2026-04-16T07:59:40.979Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 📍 Using default address coordinates: { customerLat: 16.846084162549758, customerLon: 74.59834140555783 }
-2026-04-16T07:59:40.980Z
-2026-04-16T07:59:40.980Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 📍 Customer Info:
-2026-04-16T07:59:40.980Z
-2026-04-16T07:59:40.980Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO - User ID: new ObjectId('6999efaa4cbbb56b08424def')
-2026-04-16T07:59:40.980Z
-2026-04-16T07:59:40.980Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO - Name: Vedant Tathe
-2026-04-16T07:59:40.980Z
-2026-04-16T07:59:40.980Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO - Has Default Address: true
-2026-04-16T07:59:40.980Z
-2026-04-16T07:59:40.980Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO - Has Coordinates: true
-2026-04-16T07:59:40.980Z
-2026-04-16T07:59:40.980Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO - Latitude: 16.846084162549758
-2026-04-16T07:59:40.980Z
-2026-04-16T07:59:40.980Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO - Longitude: 74.59834140555783
-2026-04-16T07:59:41.074Z
-2026-04-16T07:59:41.074Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 📊 getNearbyProviders - Total providers: 9
-2026-04-16T07:59:41.075Z
-2026-04-16T07:59:41.075Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO ⚠️ Provider shreyash bhai water wala has no coordinates, skipping
-2026-04-16T07:59:41.075Z
-2026-04-16T07:59:41.075Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 🔍 Provider: vedant pani wale, Distance: 0.05km, Radius: 7km, InRange: true, Hours: 08:00-13:00, Accepting: true
-2026-04-16T07:59:41.075Z
-2026-04-16T07:59:41.075Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 🔍 Provider: koli water supliers, Distance: 1.53km, Radius: 8km, InRange: true, Hours: 08:00-20:00, Accepting: true
-2026-04-16T07:59:41.075Z
-2026-04-16T07:59:41.075Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 🔍 Provider: Demo Water Provider, Distance: 307.57km, Radius: 10km, InRange: false, Hours: 08:00-20:00, Accepting: true
-2026-04-16T07:59:41.075Z
-2026-04-16T07:59:41.075Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 🔍 Provider: Sahil Patil's Water Supply, Distance: 0.13km, Radius: 5km, InRange: true, Hours: 08:00-20:00, Accepting: true
-2026-04-16T07:59:41.075Z
-2026-04-16T07:59:41.075Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 🔍 Provider: sandy, Distance: 7.80km, Radius: 5km, InRange: false, Hours: 08:00-20:00, Accepting: false
-2026-04-16T07:59:41.075Z
-2026-04-16T07:59:41.075Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 🔍 Provider: naresh wale, Distance: 21.09km, Radius: 10km, InRange: false, Hours: 08:00-20:00, Accepting: false
-2026-04-16T07:59:41.076Z
-2026-04-16T07:59:41.076Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 🔍 Provider: ankan wale, Distance: 1.60km, Radius: 7km, InRange: true, Hours: 08:00-20:00, Accepting: false
-2026-04-16T07:59:41.076Z
-2026-04-16T07:59:41.076Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO 🔍 Provider: provider's water supply, Distance: 0.04km, Radius: 10km, InRange: true, Hours: 08:00-20:00, Accepting: false
-2026-04-16T07:59:41.076Z
-2026-04-16T07:59:41.076Z 466f7547-aae5-4e59-97db-a564f73c3963 INFO ✅ Providers in range: 5
-2026-04-16T07:59:41.076Z
-2026-04-16T07:59:41.076Z 466f7547-aae5-4e59-97db-a564f73c3963 ERROR 🔥 [TEST_ERROR_2] BACKEND ERROR: Nearby providers validation failed
-2026-04-16T07:59:41.076Z
-2026-04-16T07:59:41.076Z 466f7547-aae5-4e59-97db-a564f73c3963 ERROR ❌ Get nearby providers error: TEST_ERROR: Failed to validate nearby providers data - Invalid provider object structure { errorType: 'Error' }
-2026-04-16T07:59:41.095Z
-END RequestId: 466f7547-aae5-4e59-97db-a564f73c3963
-2026-04-16T07:59:41.095Z
-REPORT RequestId: 466f7547-aae5-4e59-97db-a564f73c3963 Duration: 154.35 ms Billed Duration: 155 ms Memory Size: 512 MB Max Memory Used: 166 MB
-2026-04-16T07:59:43.441Z
-START RequestId: b88081ed-b3d6-49a9-8b56-b9ac231315cc Version: $LATEST
-2026-04-16T07:59:43.443Z
-2026-04-16T07:59:43.443Z b88081ed-b3d6-49a9-8b56-b9ac231315cc INFO [authenticateToken] Auth header: Present
-2026-04-16T07:59:43.443Z
-2026-04-16T07:59:43.443Z b88081ed-b3d6-49a9-8b56-b9ac231315cc INFO [authenticateToken] Token: Extracted
-2026-04-16T07:59:43.444Z
-2026-04-16T07:59:43.444Z b88081ed-b3d6-49a9-8b56-b9ac231315cc INFO [authenticateToken] Token decoded, userId: 6999efaa4cbbb56b08424def
-2026-04-16T07:59:43.450Z
-2026-04-16T07:59:43.450Z b88081ed-b3d6-49a9-8b56-b9ac231315cc INFO [authenticateToken] User found: { id: new ObjectId('6999efaa4cbbb56b08424def'), role: 'customer', email: 'tathevedant70@gmail.com' }
-2026-04-16T07:59:43.450Z
-2026-04-16T07:59:43.450Z b88081ed-b3d6-49a9-8b56-b9ac231315cc INFO [authorizeRoles] Checking roles: [ 'customer' ]
-2026-04-16T07:59:43.453Z
-2026-04-16T07:59:43.453Z b88081ed-b3d6-49a9-8b56-b9ac231315cc INFO [authorizeRoles] req.user exists? true
-2026-04-16T07:59:43.453Z
-2026-04-16T07:59:43.453Z b88081ed-b3d6-49a9-8b56-b9ac231315cc INFO [authorizeRoles] User role: customer
-2026-04-16T07:59:43.453Z
-2026-04-16T07:59:43.453Z b88081ed-b3d6-49a9-8b56-b9ac231315cc INFO [authorizeRoles] Authorization successful
-2026-04-16T07:59:43.536Z
-END RequestId: b88081ed-b3d6-49a9-8b56-b9ac231315cc
-2026-04-16T07:59:43.536Z
-REPORT RequestId: b88081ed-b3d6-49a9-8b56-b9ac231315cc Duration: 94.77 ms Billed Duration: 95 ms Memory Size: 512 MB Max Memory Used: 166 MB
-2026-04-16T08:03:24.386Z
-2026-04-16T08:03:24.386Z b88081ed-b3d6-49a9-8b56-b9ac231315cc WARN [2026-04-16T08:03:24.386Z] [PID: 2] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Thu Apr 16 2026 08:00:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
-2026-04-16T08:03:24.395Z
-2026-04-16T08:03:24.395Z b88081ed-b3d6-49a9-8b56-b9ac231315cc WARN [2026-04-16T08:03:24.395Z] [PID: 2] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Thu Apr 16 2026 08:01:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
-2026-04-16T08:03:24.396Z
-START RequestId: 0dc73a73-1af4-4b7f-8a86-495d8978c735 Version: $LATEST
-2026-04-16T08:03:24.433Z
-2026-04-16T08:03:24.433Z b88081ed-b3d6-49a9-8b56-b9ac231315cc WARN [2026-04-16T08:03:24.433Z] [PID: 2] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Thu Apr 16 2026 08:02:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
-2026-04-16T08:03:24.436Z
-2026-04-16T08:03:24.436Z b88081ed-b3d6-49a9-8b56-b9ac231315cc WARN [2026-04-16T08:03:24.436Z] [PID: 2] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Thu Apr 16 2026 08:03:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
-2026-04-16T08:03:24.477Z
-2026-04-16T08:03:24.477Z 0dc73a73-1af4-4b7f-8a86-495d8978c735 INFO [authenticateToken] Auth header: Present`;
+      if (isMockLiveDebugPayload(extractedLogs)) {
+        alert(
+          "⚠️ Mock/test logs detected (LIVE DEBUG SESSION LOGS format). Point Deployment API to real backend CloudWatch API before fixing with AI.",
+        );
+        setShowConfirmation(false);
+        setStatus("idle");
+        return;
+      }
+
+      const { errorCount, warningCount } = getLogSeverityCounts(extractedLogs);
+
+      if (errorCount === 0) {
+        alert(
+          "✅ Found 0 errors in the extracted logs. No need to fix with AI.",
+        );
+        setShowConfirmation(false);
+        setStatus("success");
+        return;
+      }
+
+      const prompt = `You are a senior backend reliability engineer. Analyze these AWS CloudWatch logs for ${resourceName}.\n\nDetected by DeployGuru:\n- Errors: ${errorCount}\n- Warnings: ${warningCount}\n\nPlease do the following:\n1. Count and list each distinct error with frequency.\n2. Identify the most likely root cause(s).\n3. Propose the minimal safe fix with exact code changes.\n4. Provide validation steps/tests to confirm the fix.\n\nCloudWatch logs:\n${extractedLogs}`;
       setShowConfirmation(false);
       onLogsExtracted(extractedLogs, prompt);
     } catch (error) {
@@ -708,7 +947,12 @@ START RequestId: 0dc73a73-1af4-4b7f-8a86-495d8978c735 Version: $LATEST
             if (status === "error" || status === "no-logs") {
               setStatus("idle");
             }
-            handleCheckDeployment();
+            handleCheckDeployment().catch((error) => {
+              console.error(
+                "[DEBUG] Unexpected handleCheckDeployment error",
+                error,
+              );
+            });
           }}
           disabled={isLoading}
           className={`rounded-lg px-4 py-2 font-medium transition-colors ${
@@ -782,6 +1026,38 @@ START RequestId: 0dc73a73-1af4-4b7f-8a86-495d8978c735 Version: $LATEST
           💡 Open console (F12) to see detailed debug logs
         </div>
       </div>
+      {liveSessionId && (
+        <div className="mt-3 rounded-lg border border-gray-300 bg-gray-900 p-3">
+          <div className="mb-2 flex items-center justify-between text-xs text-gray-200">
+            <span>
+              Live logs: {liveLogLines.length} lines (showing latest{" "}
+              {visibleLiveLines.length})
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsAutoScrollEnabled(true)}
+              className="rounded bg-blue-600 px-2 py-1 text-white hover:bg-blue-700"
+            >
+              Jump to latest
+            </button>
+          </div>
+          <div
+            ref={liveLogContainerRef}
+            onScroll={(event) => {
+              const target = event.currentTarget;
+              const distanceFromBottom =
+                target.scrollHeight - target.scrollTop - target.clientHeight;
+              setIsAutoScrollEnabled(distanceFromBottom < 24);
+            }}
+            className="scroll-container h-64 overflow-y-scroll rounded border border-gray-700 p-2"
+            style={{ scrollbarGutter: "stable" }}
+          >
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs text-green-300">
+              {visibleLiveLines.join("\n")}
+            </pre>
+          </div>
+        </div>
+      )}
     </>
   );
 };

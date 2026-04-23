@@ -12,7 +12,8 @@ import { getExtensionVersion } from "./util/util";
 export { default as buildTimestamp } from "./.buildTimestamp";
 
 async function dynamicImportAndActivate(context: vscode.ExtensionContext) {
-  await setupCa();
+  // Do not block activation on CA setup; initialize certificates in background.
+  void setupCa();
   const { activateExtension } = await import("./activation/activate");
   return await activateExtension(context);
 }

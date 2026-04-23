@@ -69,22 +69,24 @@ export async function activateExtension(context: vscode.ExtensionContext) {
       "config-yaml-schema.json",
     ).toString();
 
-    try {
-      await yamlConfig.update(
-        "schemas",
-        {
-          ...yamlSchemas,
-          [newPath]: [yamlMatcher],
-        },
-        vscode.ConfigurationTarget.Global,
-      );
-    } catch (error) {
-      // In some environments this setting may exist but still be non-writable.
-      const message = error instanceof Error ? error.message : String(error);
-      if (!message.includes("not a registered configuration")) {
-        console.warn("Failed to register Continue config.yaml schema", error);
+    void (async () => {
+      try {
+        await yamlConfig.update(
+          "schemas",
+          {
+            ...yamlSchemas,
+            [newPath]: [yamlMatcher],
+          },
+          vscode.ConfigurationTarget.Global,
+        );
+      } catch (error) {
+        // In some environments this setting may exist but still be non-writable.
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.includes("not a registered configuration")) {
+          console.warn("Failed to register Continue config.yaml schema", error);
+        }
       }
-    }
+    })();
   }
 
   const api = new VsCodeContinueApi(vscodeExtension);

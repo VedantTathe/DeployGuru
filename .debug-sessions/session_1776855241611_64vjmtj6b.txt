@@ -1,0 +1,32 @@
+[LIVE DEBUG SESSION]
+Resource: JalSaathi
+Session ID: session_1776855241611_64vjmtj6b
+Started: 2026-04-22T10:54:01.613Z
+Session Start Time (UTC epoch ms): 1776855239722
+
+
+[LIVE DEBUG SESSION LOGS]
+Resource: JalSaathi
+Session ID: session_1776855241611_64vjmtj6b
+Started: 2026-04-22T10:54:01.612Z
+Ended: 2026-04-22T10:55:03.547Z
+Duration: 62s
+Session Start Time (UTC epoch ms): 1776855239722
+Last Poll At: 2026-04-22T10:54:08.094Z
+Log Group: /aws/lambda/JalSaathiStack-JalSaathiBackendFunctionFBB18D16-vcdHQNJR8fws
+Region: ap-south-1
+Total Streamed Lines: 8
+Poll Errors: 1
+
+════════════════════════════════════════════════════════════
+
+COLLECTED LOGS:
+
+  id: new ObjectId('69e512943ba57d5027532fbb'),
+  role: 'customer',
+  email: 'mahirbajole653@gmail.com'
+}
+  id: new ObjectId('69e512943ba57d5027532fbb'),
+  role: 'customer',
+  email: 'mahirbajole653@gmail.com'
+}

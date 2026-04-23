@@ -1,0 +1,26 @@
+[LIVE DEBUG SESSION]
+Resource: JalSaathi
+Session ID: session_1776857778455_6zcyots72
+Started: 2026-04-22T11:36:18.459Z
+Session Start Time (UTC epoch ms): 1776857777818
+
+
+[LIVE DEBUG SESSION LOGS]
+Resource: JalSaathi
+Session ID: session_1776857778455_6zcyots72
+Started: 2026-04-22T11:36:18.458Z
+Ended: 2026-04-22T11:37:00.485Z
+Duration: 42s
+Session Start Time (UTC epoch ms): 1776857777818
+Last Poll At: never
+Log Group: /aws/lambda/JalSaathiStack-JalSaathiBackendFunctionFBB18D16-vcdHQNJR8fws
+Region: ap-south-1
+Total Streamed Lines: 0
+Reconnects: 0
+Poll Errors: 0
+
+════════════════════════════════════════════════════════════
+
+COLLECTED LOGS:
+
+

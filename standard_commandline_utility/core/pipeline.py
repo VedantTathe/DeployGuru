@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import time
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from standard_commandline_utility.api.aws import AWSProvider
@@ -11,9 +11,10 @@ def run_pipeline(
     resource: str,
     service: str = 'lambda',
     window: str = '5m',
+    start_time_ms: Optional[int] = None,
     keywords: Optional[List[str]] = None,
-    region: Optional[str] = None,
-    profile: Optional[str] = None,
+    region: Optional[str] = 'ap-south-1',
+    profile: Optional[str] = 'default',
     max_events: Optional[int] = None,
     stream_only: bool = False,
     out: str = 'extracted_logs.txt',
@@ -22,36 +23,39 @@ def run_pipeline(
 
     Returns exit code (0 success, >0 error).
     """
-    duration_s = parse_duration(window)
-    end_time = int(time.time())
-    start_time = end_time - duration_s
+    end_time = int(datetime.now(timezone.utc).timestamp())
+    if start_time_ms is not None:
+        # Caller provides UTC epoch milliseconds (e.g. live session start time).
+        start_time = int(start_time_ms // 1000)
+    else:
+        duration_s = parse_duration(window)
+        start_time = end_time - duration_s
 
-    session_kwargs = {}
-    if profile:
-        session_kwargs['profile_name'] = profile
-    if region:
-        session_kwargs['region_name'] = region
+    session_kwargs = {
+        'profile_name': profile or 'default',
+        'region_name': region or 'ap-south-1',
+    }
 
     provider = AWSProvider(session_kwargs=session_kwargs)
     fetcher = provider.create_service_fetcher(service, resource)
 
     if stream_only:
-        streams = fetcher.list_active_streams(start_time, end_time)
-        if not streams:
+        evs = fetcher.fetch_events(start_time, end_time, keywords=None, max_events=None)
+        if not evs:
             print(f"Resolved log group: {fetcher.resolve_resource()}")
             print("No log streams have events in the requested window.")
             open(out, 'w', encoding='utf-8').close()
             return 0
 
         out_lines: List[str] = []
-        evs = fetcher.fetch_events(start_time, end_time, keywords=None, max_events=None)
-        for stream_name in streams:
-            for e in evs:
-                if e.get('logStreamName') == stream_name:
-                    ts = iso_ts(e.get('timestamp', 0))
-                    msg = e.get('message', '')
-                    msg = msg.rstrip('\n')
-                    out_lines.append(f"{ts}  {stream_name}  {msg}")
+        streams = set()
+        for e in evs:
+            stream_name = e.get('logStreamName', '-')
+            streams.add(stream_name)
+            ts = iso_ts(e.get('timestamp', 0))
+            msg = e.get('message', '')
+            msg = msg.rstrip('\n')
+            out_lines.append(f"{ts}  {stream_name}  {msg}")
 
         out_lines.sort()
         with open(out, 'w', encoding='utf-8') as fh:
